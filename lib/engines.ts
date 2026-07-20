@@ -223,7 +223,7 @@ export const ENGINES: EngineDef[] = [
     emoji: "🎭",
     color: "#8b5cf6",
     color2: "#ec4899",
-    status: "soon",
+    status: "live",
     category: "Play",
   },
   {
@@ -233,7 +233,7 @@ export const ENGINES: EngineDef[] = [
     emoji: "✅",
     color: "#22c55e",
     color2: "#0ea5e9",
-    status: "soon",
+    status: "live",
     category: "Everyday",
   },
   {
@@ -243,7 +243,7 @@ export const ENGINES: EngineDef[] = [
     emoji: "🎁",
     color: "#f43f5e",
     color2: "#f59e0b",
-    status: "soon",
+    status: "live",
     category: "Random",
   },
   {
@@ -253,7 +253,7 @@ export const ENGINES: EngineDef[] = [
     emoji: "🌳",
     color: "#10b981",
     color2: "#84cc16",
-    status: "soon",
+    status: "live",
     category: "Everyday",
   },
   {
@@ -263,7 +263,7 @@ export const ENGINES: EngineDef[] = [
     emoji: "📦",
     color: "#94a3b8",
     color2: "#e2e8f0",
-    status: "soon",
+    status: "live",
     category: "Random",
   },
   {
@@ -273,7 +273,7 @@ export const ENGINES: EngineDef[] = [
     emoji: "📖",
     color: "#f97316",
     color2: "#f472b6",
-    status: "soon",
+    status: "live",
     category: "Play",
   },
 ];

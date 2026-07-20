@@ -21,6 +21,12 @@ import PairEngine from "./PairEngine";
 import FortuneEngine from "./FortuneEngine";
 import FingerEngine from "./FingerEngine";
 import TimerEngine from "./TimerEngine";
+import TruthDareEngine from "./TruthDareEngine";
+import TaskEngine from "./TaskEngine";
+import PrizeEngine from "./PrizeEngine";
+import TreeEngine from "./TreeEngine";
+import ObjectEngine from "./ObjectEngine";
+import FlipBookEngine from "./FlipBookEngine";
 import ComingSoon from "./ComingSoon";
 
 export default function EngineRouter({ engine }: { engine: EngineDef }) {
@@ -65,6 +71,18 @@ export default function EngineRouter({ engine }: { engine: EngineDef }) {
       return <FingerEngine engine={engine} />;
     case "timer":
       return <TimerEngine engine={engine} />;
+    case "truthdare":
+      return <TruthDareEngine engine={engine} />;
+    case "task":
+      return <TaskEngine engine={engine} />;
+    case "prize":
+      return <PrizeEngine engine={engine} />;
+    case "tree":
+      return <TreeEngine engine={engine} />;
+    case "object":
+      return <ObjectEngine engine={engine} />;
+    case "flipbook":
+      return <FlipBookEngine engine={engine} />;
     default:
       return <ComingSoon engine={engine} />;
   }
