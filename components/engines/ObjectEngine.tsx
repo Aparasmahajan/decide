@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import EngineShell, {
   BigActionButton,
   SidePanel,
@@ -21,9 +21,13 @@ export default function ObjectEngine({ engine }: { engine: EngineDef }) {
   const [current, setCurrent] = useState<string | null>(null);
   const [rolling, setRolling] = useState(false);
   const [done, setDone] = useState(false);
+  const ivRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     setCfg(readConfig<ObjectConfig>(engine.slug, DEFAULT));
+    return () => {
+      if (ivRef.current) clearInterval(ivRef.current);
+    };
   }, [engine.slug]);
 
   const persist = (patch: Partial<ObjectConfig>) => {
@@ -46,6 +50,7 @@ export default function ObjectEngine({ engine }: { engine: EngineDef }) {
       n++;
       if (n > 20) {
         clearInterval(iv);
+        ivRef.current = null;
         const winner = pick(cfg.objects);
         setCurrent(winner);
         setRolling(false);
@@ -56,6 +61,7 @@ export default function ObjectEngine({ engine }: { engine: EngineDef }) {
         }
       }
     }, 75);
+    ivRef.current = iv;
   };
 
   const big = current ? isEmoji(current) : false;

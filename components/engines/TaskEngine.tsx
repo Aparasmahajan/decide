@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import EngineShell, {
   BigActionButton,
   SidePanel,
@@ -27,9 +27,13 @@ export default function TaskEngine({ engine }: { engine: EngineDef }) {
   const [current, setCurrent] = useState<string | null>(null);
   const [rolling, setRolling] = useState(false);
   const [done, setDone] = useState(false);
+  const ivRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     setCfg(readConfig<TaskConfig>(engine.slug, DEFAULT));
+    return () => {
+      if (ivRef.current) clearInterval(ivRef.current);
+    };
   }, [engine.slug]);
 
   const persist = (patch: Partial<TaskConfig>) => {
@@ -50,6 +54,7 @@ export default function TaskEngine({ engine }: { engine: EngineDef }) {
       n++;
       if (n > 18) {
         clearInterval(iv);
+        ivRef.current = null;
         const winner = pick(cfg.tasks);
         setCurrent(winner);
         setRolling(false);
@@ -60,6 +65,7 @@ export default function TaskEngine({ engine }: { engine: EngineDef }) {
         }
       }
     }, 85);
+    ivRef.current = iv;
   };
 
   return (
