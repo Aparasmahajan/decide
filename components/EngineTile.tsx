@@ -11,28 +11,44 @@ type Props = { engine: EngineDef; index: number };
 
 export default function EngineTile({ engine, index }: Props) {
   const ref = useRef<HTMLAnchorElement>(null);
+  const rafRef = useRef<number | null>(null);
+  const hoveredRef = useRef(false);
 
+  // Motion values drive CSS transform on the GPU without React re-renders.
   const rx = useMotionValue(0);
   const ry = useMotionValue(0);
-  const rxs = useSpring(rx, { stiffness: 220, damping: 20 });
-  const rys = useSpring(ry, { stiffness: 220, damping: 20 });
-
+  const rxs = useSpring(rx, { stiffness: 260, damping: 26, mass: 0.6 });
+  const rys = useSpring(ry, { stiffness: 260, damping: 26, mass: 0.6 });
   const glareX = useTransform(rys, [-8, 8], ["20%", "80%"]);
   const glareY = useTransform(rxs, [-8, 8], ["80%", "20%"]);
 
+  const onEnter = () => {
+    hoveredRef.current = true;
+  };
+
   const onMove = (e: React.MouseEvent) => {
+    if (!hoveredRef.current) return;
+    if (rafRef.current !== null) return;
     const el = ref.current;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const px = x / rect.width - 0.5;
-    const py = y / rect.height - 0.5;
-    ry.set(px * 12);
-    rx.set(-py * 12);
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const rect = el.getBoundingClientRect();
+      const px = (clientX - rect.left) / rect.width - 0.5;
+      const py = (clientY - rect.top) / rect.height - 0.5;
+      ry.set(px * 10);
+      rx.set(-py * 10);
+    });
   };
 
   const onLeave = () => {
+    hoveredRef.current = false;
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
     rx.set(0);
     ry.set(0);
   };
@@ -41,67 +57,73 @@ export default function EngineTile({ engine, index }: Props) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20, scale: 0.98 }}
-      whileInView={{ opacity: 1, y: 0, scale: 1 }}
-      viewport={{ once: true, margin: "-40px" }}
+      initial={{ opacity: 0, y: 16 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-60px" }}
       transition={{
-        duration: 0.55,
-        delay: Math.min(index * 0.03, 0.4),
+        duration: 0.5,
+        delay: Math.min(index * 0.025, 0.35),
         ease: [0.22, 0.9, 0.28, 1],
       }}
-      style={{ perspective: 1200 }}
+      className="tile-wrapper"
     >
       <Link
         ref={ref}
         href={soon ? "#" : `/engine/${engine.slug}`}
+        onMouseEnter={onEnter}
         onMouseMove={onMove}
         onMouseLeave={onLeave}
         className={cn(
           "group relative block h-full overflow-hidden rounded-3xl border border-white/10 p-5 sm:p-6",
-          "transition-shadow duration-500 hover:shadow-glow-lg",
+          "bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015))]",
+          "transition-[transform,box-shadow] duration-500 hover:shadow-glow",
           soon && "cursor-not-allowed",
         )}
+        style={{
+          // Establish 3D context on the anchor itself — cheaper than nested transform-style.
+          perspective: 1000,
+        }}
       >
+        {/* Static gradient overlay — no backdrop-filter, pure paint. */}
+        <div
+          className="pointer-events-none absolute inset-0 -z-10"
+          aria-hidden
+          style={{
+            background: `radial-gradient(120% 100% at 0% 0%, ${engine.color}22 0%, transparent 55%), radial-gradient(120% 100% at 100% 100%, ${engine.color2}22 0%, transparent 55%)`,
+          }}
+        />
+
         <motion.div
           style={{
             rotateX: rxs,
             rotateY: rys,
             transformStyle: "preserve-3d",
+            willChange: "transform",
           }}
           className="relative h-full"
         >
-          {/* Gradient background */}
-          <div
-            className="absolute inset-0 -z-10 opacity-70 transition-opacity duration-500 group-hover:opacity-90"
-            style={{
-              background: `radial-gradient(120% 100% at 0% 0%, ${engine.color}33 0%, transparent 60%), radial-gradient(120% 100% at 100% 100%, ${engine.color2}33 0%, transparent 60%), linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)`,
-            }}
-          />
-          <div className="absolute inset-0 -z-10 backdrop-blur-xl" />
-          {/* Glare */}
+          {/* Glare — only paints when hovered (opacity toggles the layer). */}
           <motion.div
             className="pointer-events-none absolute inset-0 rounded-3xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
             style={{
-              background: `radial-gradient(400px 200px at ${glareX} ${glareY}, rgba(255,255,255,0.15), transparent 60%)`,
+              background: `radial-gradient(300px 180px at ${glareX} ${glareY}, rgba(255,255,255,0.14), transparent 60%)`,
             }}
           />
-          {/* Content */}
+
           <div className="flex h-full flex-col justify-between gap-6">
             <div className="flex items-start justify-between">
-              <motion.div
-                className="grid h-14 w-14 place-items-center rounded-2xl text-3xl shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]"
+              <div
+                className="grid h-14 w-14 place-items-center rounded-2xl text-3xl shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] transition-transform duration-300 group-hover:scale-105 group-hover:-rotate-3"
                 style={{
                   background: `linear-gradient(135deg, ${engine.color}, ${engine.color2})`,
-                  transform: "translateZ(40px)",
+                  transform: "translateZ(30px)",
                 }}
-                whileHover={{ scale: 1.06, rotate: -4 }}
-                transition={{ type: "spring", stiffness: 300 }}
               >
-                <span className="drop-shadow-sm">{engine.emoji}</span>
-              </motion.div>
+                <span>{engine.emoji}</span>
+              </div>
               <div
                 className="flex items-center gap-1 text-xs text-white/40"
-                style={{ transform: "translateZ(20px)" }}
+                style={{ transform: "translateZ(16px)" }}
               >
                 {soon ? (
                   <span className="chip">
@@ -115,7 +137,7 @@ export default function EngineTile({ engine, index }: Props) {
               </div>
             </div>
 
-            <div style={{ transform: "translateZ(30px)" }}>
+            <div style={{ transform: "translateZ(20px)" }}>
               <h3 className="text-[17px] font-semibold tracking-tight text-white">
                 {engine.name}
               </h3>
@@ -125,11 +147,11 @@ export default function EngineTile({ engine, index }: Props) {
             </div>
           </div>
 
-          {/* Border glow */}
+          {/* Border glow — cheap, only visible on hover. */}
           <div
             className="pointer-events-none absolute inset-0 rounded-3xl opacity-0 transition-opacity duration-500 group-hover:opacity-100"
             style={{
-              boxShadow: `0 0 0 1px ${engine.color}55, 0 20px 60px -20px ${engine.color2}66`,
+              boxShadow: `0 0 0 1px ${engine.color}44, 0 16px 40px -20px ${engine.color2}66`,
             }}
           />
         </motion.div>

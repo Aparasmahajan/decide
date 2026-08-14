@@ -48,7 +48,7 @@ export default function HomePage() {
   return (
     <div className="relative min-h-screen">
       <AuroraBackground />
-      <ParticleField count={80} />
+      <ParticleField count={35} />
       <Nav />
 
       {/* Hero */}
@@ -190,13 +190,13 @@ export default function HomePage() {
 }
 
 function FloatingHeroWidgets({ reduce }: { reduce: boolean }) {
+  // Four widgets, no backdrop-blur, all use the same idle animation phase.
+  // Fewer moving elements = less compositor thrash on scroll and paint.
   const widgets = [
-    { text: "🪙", pos: "left-[6%] top-[10%]", d: 0.1, rot: -6, y: -16 },
-    { text: "🎲", pos: "right-[8%] top-[6%]", d: 0.2, rot: 8, y: -12 },
-    { text: "🎡", pos: "left-[3%] top-[62%]", d: 0.4, rot: -12, y: 20 },
-    { text: "🎱", pos: "right-[4%] top-[64%]", d: 0.3, rot: 10, y: 18 },
-    { text: "🧭", pos: "left-[20%] top-[74%]", d: 0.55, rot: 4, y: 8 },
-    { text: "🃏", pos: "right-[20%] top-[8%]", d: 0.35, rot: -8, y: -8 },
+    { text: "🪙", pos: "left-[6%] top-[10%]", d: 0.1, rot: -6, y: -12 },
+    { text: "🎲", pos: "right-[8%] top-[6%]", d: 0.2, rot: 8, y: -10 },
+    { text: "🎡", pos: "left-[6%] top-[64%]", d: 0.35, rot: -10, y: 14 },
+    { text: "🎱", pos: "right-[6%] top-[64%]", d: 0.25, rot: 10, y: 14 },
   ];
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0">
@@ -206,10 +206,11 @@ function FloatingHeroWidgets({ reduce }: { reduce: boolean }) {
           className={`absolute ${w.pos} hidden sm:block`}
           initial={{ opacity: 0, y: 20, rotate: w.rot }}
           animate={{ opacity: 1, y: 0, rotate: w.rot }}
-          transition={{ duration: 0.8, delay: w.d, ease: "easeOut" }}
+          transition={{ duration: 0.7, delay: w.d, ease: "easeOut" }}
         >
           <motion.div
-            className="grid h-16 w-16 place-items-center rounded-2xl border border-white/10 bg-white/5 text-3xl backdrop-blur-xl shadow-soft-lg"
+            className="grid h-16 w-16 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-3xl shadow-soft-lg"
+            style={{ willChange: reduce ? undefined : "transform" }}
             animate={
               reduce
                 ? undefined
@@ -219,7 +220,7 @@ function FloatingHeroWidgets({ reduce }: { reduce: boolean }) {
                   }
             }
             transition={{
-              duration: 6 + i * 0.7,
+              duration: 7 + i * 0.6,
               repeat: Infinity,
               ease: "easeInOut",
             }}
