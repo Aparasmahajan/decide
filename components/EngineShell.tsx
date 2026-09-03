@@ -35,7 +35,7 @@ export default function EngineShell({
   return (
     <div className="relative min-h-screen">
       <AuroraBackground variant={variant} />
-      <ParticleField count={45} />
+      <ParticleField count={22} />
       <Nav />
 
       <div className="mx-auto flex max-w-7xl flex-col gap-8 px-6 pb-24 pt-4 lg:pt-8">

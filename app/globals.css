@@ -43,19 +43,27 @@ body {
   color: #fff;
 }
 
-/* Glass */
+/*
+ * Glass surfaces.
+ *
+ * `backdrop-filter` is expensive — each element with it forces the compositor
+ * to sample and re-blur pixels behind it every frame. We keep it only for a
+ * handful of large panels (engine shell + side panels + hero pill),
+ * with a moderate 12px blur instead of the previous 20-30px.
+ * Tiles use a solid gradient bg (see EngineTile) to avoid the cost at scale.
+ */
 .glass {
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.06) 0%,
     rgba(255, 255, 255, 0.02) 100%
   );
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 30px 60px -20px rgba(0, 0, 0, 0.5);
+    0 20px 40px -20px rgba(0, 0, 0, 0.45);
 }
 
 .glass-strong {
@@ -64,9 +72,25 @@ body {
     rgba(255, 255, 255, 0.1) 0%,
     rgba(255, 255, 255, 0.04) 100%
   );
-  backdrop-filter: blur(30px) saturate(160%);
-  -webkit-backdrop-filter: blur(30px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/*
+ * Solid glass — same visual language, no backdrop-filter.
+ * Use for tiles or lists where many instances would otherwise stack blur cost.
+ */
+.glass-solid {
+  background: linear-gradient(
+    180deg,
+    rgba(16, 18, 46, 0.7) 0%,
+    rgba(8, 9, 28, 0.6) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 20px 40px -20px rgba(0, 0, 0, 0.45);
 }
 
 /* Hairline dividers */
@@ -154,6 +178,15 @@ a:focus-visible {
 .backface-hidden {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+}
+
+/*
+ * Skip painting off-screen tiles until they enter the viewport.
+ * The `contain-intrinsic-size` prevents layout thrash while the tile is elided.
+ */
+.tile-wrapper {
+  content-visibility: auto;
+  contain-intrinsic-size: 260px;
 }
 
 /* Chip */
