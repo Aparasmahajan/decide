@@ -213,19 +213,28 @@ export default function CoinEngine({ engine }: { engine: EngineDef }) {
 
         {/* Coin */}
         <div className="perspective-1000 relative flex-1 grid place-items-center w-full">
+          {/*
+            No `key={flipCount}` here. Keying on the flip counter tore down and
+            rebuilt the coin on every flip, which meant re-rasterizing two
+            240px conic-gradient faces plus their inset shadows and 60px glow
+            from scratch at the exact frame the spin started — a visible hitch
+            on the first frame of every flip. `rotation` only ever increases, so
+            animating it directly gives the same motion and lets the browser
+            keep the already-painted faces.
+          */}
           <motion.div
             aria-live="polite"
             className="preserve-3d relative"
             style={{
               width: 240,
               height: 240,
+              willChange: flipping ? "transform" : undefined,
             }}
             animate={{ rotateX: rotation }}
             transition={{
               duration: 2.2,
               ease: [0.16, 0.84, 0.28, 1],
             }}
-            key={flipCount}
           >
             <CoinFace label={cfg.headsLabel} skin={skin} kind="H" />
             <CoinFace label={cfg.tailsLabel} skin={skin} kind="T" flipped />

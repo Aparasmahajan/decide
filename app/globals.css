@@ -25,17 +25,44 @@ body {
   color: var(--ink);
   font-family: Inter, "SF Pro Display", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
 
-body {
+/*
+ * Page backdrop.
+ *
+ * This used to be `background-attachment: fixed` on <body>. That is one of the
+ * most expensive things you can put on a scrolling page: the background is
+ * anchored to the viewport but owned by a scrolling element, so the browser
+ * cannot cache it in a composited layer and repaints four stacked gradients
+ * across the full viewport on *every* scroll frame.
+ *
+ * A fixed-position pseudo-element paints once into its own layer and is then
+ * free to scroll over. Identical visual, zero per-frame cost.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
     radial-gradient(1200px 800px at 15% -10%, rgba(139, 92, 246, 0.22), transparent 60%),
     radial-gradient(1000px 700px at 100% 10%, rgba(56, 189, 248, 0.18), transparent 60%),
     radial-gradient(900px 700px at 50% 110%, rgba(244, 114, 182, 0.18), transparent 60%),
     linear-gradient(180deg, #04051f 0%, #06072a 60%, #04051f 100%);
-  background-attachment: fixed;
+}
+
+/*
+ * `body::before` sits at z-index -1, and the ambient layers (aurora, particles)
+ * sit at -10. Without a stacking context here those -10 layers would resolve
+ * against the root and paint *behind* the opaque page backdrop. Isolating the
+ * app root scopes them to it, so they render above the backdrop and below the
+ * page content — which is where they were before the backdrop moved into a
+ * pseudo-element.
+ */
+#app-root {
+  isolation: isolate;
 }
 
 ::selection {
@@ -104,14 +131,46 @@ body {
   height: 1px;
 }
 
-/* Aurora blobs */
-.aurora {
+/*
+ * Aurora blobs.
+ *
+ * These drift forever, so they must cost nothing on the main thread:
+ * - CSS keyframes on `transform` only, so the animation runs entirely on the
+ *   compositor (the previous framer-motion version woke React's animation loop
+ *   3x per frame for the whole life of every page).
+ * - No `mix-blend-mode`. A blend mode forces the compositor to read back the
+ *   pixels underneath before it can draw, which defeats layer caching and makes
+ *   the (very expensive) 60px blur re-rasterize on movement.
+ * - `will-change: transform` promotes each blob once so the blur is rasterized
+ *   a single time and only the cheap transform changes per frame.
+ */
+.aurora-blob {
   position: absolute;
-  filter: blur(80px);
-  opacity: 0.6;
   border-radius: 50%;
   pointer-events: none;
-  mix-blend-mode: screen;
+  filter: blur(60px);
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes aurora-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  33%      { transform: translate3d(30px, -20px, 0); }
+  66%      { transform: translate3d(-20px, 20px, 0); }
+}
+
+@keyframes aurora-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  33%      { transform: translate3d(-25px, 15px, 0); }
+  66%      { transform: translate3d(15px, -20px, 0); }
+}
+
+@keyframes aurora-drift-c {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  33%      { transform: translate3d(25px, -15px, 0); }
+  66%      { transform: translate3d(-25px, 15px, 0); }
 }
 
 /* Scrollbar */
@@ -186,7 +245,40 @@ a:focus-visible {
  */
 .tile-wrapper {
   content-visibility: auto;
-  contain-intrinsic-size: 260px;
+  /*
+   * `auto` makes the browser remember each tile's real measured size after it
+   * has been rendered once. With a bare `260px` every tile that scrolls out
+   * snaps back to the 260px guess, which shifts the scrollbar and re-lays-out
+   * the grid on the way back up.
+   */
+  contain-intrinsic-size: auto 260px;
+}
+
+/*
+ * Hero widget idle bob.
+ *
+ * CSS rather than framer-motion: these loop forever, and a JS-driven infinite
+ * animation keeps ticking on the main thread even after the hero has scrolled
+ * out of view. As a CSS animation on `transform` it runs on the compositor, and
+ * the browser stops servicing it entirely once the element is off-screen.
+ * `--rot` and `--dy` are set per widget inline.
+ */
+.hero-bob {
+  transform: rotate(var(--rot));
+  animation: hero-bob 7s ease-in-out infinite;
+  animation-delay: var(--bob-delay, 0s);
+  will-change: transform;
+}
+
+@keyframes hero-bob {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(var(--rot)); }
+  50%      { transform: translate3d(0, var(--dy), 0) rotate(calc(var(--rot) + 3deg)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-bob {
+    animation: none;
+  }
 }
 
 /* Chip */

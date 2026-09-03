@@ -276,6 +276,16 @@ export const ENGINES: EngineDef[] = [
     status: "live",
     category: "Play",
   },
+  {
+    slug: "value",
+    name: "Value Compare",
+    tagline: "Which pack is actually cheaper?",
+    emoji: "🏷️",
+    color: "#10b981",
+    color2: "#f59e0b",
+    status: "live",
+    category: "Everyday",
+  },
 ];
 
 export function findEngine(slug: string) {

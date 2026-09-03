@@ -1,89 +1,55 @@
 "use client";
 
+import dynamic from "next/dynamic";
+import type { ComponentType } from "react";
 import type { EngineDef } from "@/lib/engines";
-import CoinEngine from "./CoinEngine";
-import DiceEngine from "./DiceEngine";
-import WheelEngine from "./WheelEngine";
-import BottleEngine from "./BottleEngine";
-import PersonEngine from "./PersonEngine";
-import Magic8Engine from "./Magic8Engine";
-import YesNoEngine from "./YesNoEngine";
-import NumberEngine from "./NumberEngine";
-import ColorEngine from "./ColorEngine";
-import EmojiEngine from "./EmojiEngine";
-import LetterEngine from "./LetterEngine";
-import DirectionEngine from "./DirectionEngine";
-import RPSEngine from "./RPSEngine";
-import CardEngine from "./CardEngine";
-import NameEngine from "./NameEngine";
-import TeamEngine from "./TeamEngine";
-import PairEngine from "./PairEngine";
-import FortuneEngine from "./FortuneEngine";
-import FingerEngine from "./FingerEngine";
-import TimerEngine from "./TimerEngine";
-import TruthDareEngine from "./TruthDareEngine";
-import TaskEngine from "./TaskEngine";
-import PrizeEngine from "./PrizeEngine";
-import TreeEngine from "./TreeEngine";
-import ObjectEngine from "./ObjectEngine";
-import FlipBookEngine from "./FlipBookEngine";
 import ComingSoon from "./ComingSoon";
 
-export default function EngineRouter({ engine }: { engine: EngineDef }) {
-  switch (engine.slug) {
-    case "coin":
-      return <CoinEngine engine={engine} />;
-    case "dice":
-      return <DiceEngine engine={engine} />;
-    case "wheel":
-      return <WheelEngine engine={engine} />;
-    case "bottle":
-      return <BottleEngine engine={engine} />;
-    case "person":
-      return <PersonEngine engine={engine} />;
-    case "magic8":
-      return <Magic8Engine engine={engine} />;
-    case "yesno":
-      return <YesNoEngine engine={engine} />;
-    case "number":
-      return <NumberEngine engine={engine} />;
-    case "color":
-      return <ColorEngine engine={engine} />;
-    case "emoji":
-      return <EmojiEngine engine={engine} />;
-    case "letter":
-      return <LetterEngine engine={engine} />;
-    case "direction":
-      return <DirectionEngine engine={engine} />;
-    case "rps":
-      return <RPSEngine engine={engine} />;
-    case "card":
-      return <CardEngine engine={engine} />;
-    case "name":
-      return <NameEngine engine={engine} />;
-    case "team":
-      return <TeamEngine engine={engine} />;
-    case "pair":
-      return <PairEngine engine={engine} />;
-    case "fortune":
-      return <FortuneEngine engine={engine} />;
-    case "finger":
-      return <FingerEngine engine={engine} />;
-    case "timer":
-      return <TimerEngine engine={engine} />;
-    case "truthdare":
-      return <TruthDareEngine engine={engine} />;
-    case "task":
-      return <TaskEngine engine={engine} />;
-    case "prize":
-      return <PrizeEngine engine={engine} />;
-    case "tree":
-      return <TreeEngine engine={engine} />;
-    case "object":
-      return <ObjectEngine engine={engine} />;
-    case "flipbook":
-      return <FlipBookEngine engine={engine} />;
-    default:
-      return <ComingSoon engine={engine} />;
-  }
+type EngineProps = { engine: EngineDef };
+
+/**
+ * Every /engine/[slug] route is served by the same page component, so a static
+ * `import` of each engine put all 26 of them into one client bundle: opening
+ * /engine/coin downloaded, parsed and evaluated the dice, wheel, bottle, tree
+ * and twenty-two other engines before the coin could become interactive.
+ *
+ * `next/dynamic` splits each engine into its own chunk, so a route ships only
+ * the engine it actually renders. These are still server-rendered (no
+ * `ssr: false`), so the prerendered HTML is unchanged — only the JavaScript
+ * delivery changes.
+ */
+const ENGINE_COMPONENTS: Record<string, ComponentType<EngineProps>> = {
+  coin: dynamic(() => import("./CoinEngine")),
+  dice: dynamic(() => import("./DiceEngine")),
+  wheel: dynamic(() => import("./WheelEngine")),
+  bottle: dynamic(() => import("./BottleEngine")),
+  person: dynamic(() => import("./PersonEngine")),
+  magic8: dynamic(() => import("./Magic8Engine")),
+  yesno: dynamic(() => import("./YesNoEngine")),
+  number: dynamic(() => import("./NumberEngine")),
+  color: dynamic(() => import("./ColorEngine")),
+  emoji: dynamic(() => import("./EmojiEngine")),
+  letter: dynamic(() => import("./LetterEngine")),
+  direction: dynamic(() => import("./DirectionEngine")),
+  rps: dynamic(() => import("./RPSEngine")),
+  card: dynamic(() => import("./CardEngine")),
+  name: dynamic(() => import("./NameEngine")),
+  team: dynamic(() => import("./TeamEngine")),
+  pair: dynamic(() => import("./PairEngine")),
+  fortune: dynamic(() => import("./FortuneEngine")),
+  finger: dynamic(() => import("./FingerEngine")),
+  timer: dynamic(() => import("./TimerEngine")),
+  truthdare: dynamic(() => import("./TruthDareEngine")),
+  task: dynamic(() => import("./TaskEngine")),
+  prize: dynamic(() => import("./PrizeEngine")),
+  tree: dynamic(() => import("./TreeEngine")),
+  object: dynamic(() => import("./ObjectEngine")),
+  flipbook: dynamic(() => import("./FlipBookEngine")),
+  value: dynamic(() => import("./ValueEngine")),
+};
+
+export default function EngineRouter({ engine }: EngineProps) {
+  const Engine = ENGINE_COMPONENTS[engine.slug];
+  if (!Engine) return <ComingSoon engine={engine} />;
+  return <Engine engine={engine} />;
 }

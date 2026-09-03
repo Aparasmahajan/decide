@@ -1,7 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Props = {
   intensity?: number;
@@ -9,15 +8,29 @@ type Props = {
   interactive?: boolean;
 };
 
+const PALETTES = {
+  warm: ["#f97316", "#f472b6", "#facc15"],
+  cool: ["#38bdf8", "#8b5cf6", "#22d3ee"],
+  aurora: ["#22c55e", "#38bdf8", "#a855f7"],
+  default: ["#8b5cf6", "#38bdf8", "#f472b6"],
+} as const;
+
 /**
  * Ambient animated background.
  *
  * Perf notes:
- * - The mouse-follow spotlight is a fixed-size gradient div that we translate on the GPU
- *   (transform-only mutation, no paint) — the previous version rewrote the `background`
- *   property every frame, which forced a large paint.
- * - Aurora blobs use `filter: blur(...)` at 60px (was 80) — big blurs are expensive.
- * - Skips animation and mouse tracking under `prefers-reduced-motion`.
+ * - The whole layer is `fixed`, not `absolute`. As an absolute child of a tall
+ *   page this element was as tall as the document (several thousand px on the
+ *   home page), so the compositor had to allocate and rasterize blurred layers
+ *   across the entire scroll height. Fixed pins it to the viewport — the layer
+ *   is now a constant ~1 screen no matter how long the page is.
+ * - Blob drift is pure CSS keyframes (see `.aurora-blob` in globals.css), so it
+ *   runs on the compositor thread. Previously three framer-motion springs ticked
+ *   on the main thread for the entire lifetime of every page.
+ * - The mouse-follow spotlight translates on the GPU (transform-only, no paint)
+ *   and is mounted lazily on first pointer movement, so touch devices never pay
+ *   for it at all.
+ * - Skips animation and pointer tracking under `prefers-reduced-motion`.
  */
 export default function AuroraBackground({
   intensity = 1,
@@ -26,49 +39,71 @@ export default function AuroraBackground({
 }: Props) {
   const spotlightRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
-  const reduce = useReducedMotion();
+  const [reduce, setReduce] = useState(true);
+  const [spotlightOn, setSpotlightOn] = useState(false);
+
+  // Read the preference on the client only, so SSR markup stays deterministic.
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => setReduce(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
 
   useEffect(() => {
     if (!interactive || reduce) return;
-    const el = spotlightRef.current;
-    if (!el) return;
 
     const onMove = (e: MouseEvent) => {
+      // A fine pointer is present — only now is the spotlight layer worth having.
+      if (!spotlightOn) setSpotlightOn(true);
       if (rafRef.current !== null) return;
       const x = e.clientX;
       const y = e.clientY;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;
+        const el = spotlightRef.current;
         // translate3d keeps this on the compositor (no paint, no layout).
-        el.style.transform = `translate3d(${x - 300}px, ${y - 200}px, 0)`;
+        if (el) el.style.transform = `translate3d(${x - 300}px, ${y - 200}px, 0)`;
       });
     };
 
     window.addEventListener("mousemove", onMove, { passive: true });
     return () => {
       window.removeEventListener("mousemove", onMove);
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
     };
-  }, [interactive, reduce]);
+  }, [interactive, reduce, spotlightOn]);
 
-  const palette =
-    variant === "warm"
-      ? ["#f97316", "#f472b6", "#facc15"]
-      : variant === "cool"
-        ? ["#38bdf8", "#8b5cf6", "#22d3ee"]
-        : variant === "aurora"
-          ? ["#22c55e", "#38bdf8", "#a855f7"]
-          : ["#8b5cf6", "#38bdf8", "#f472b6"];
+  const palette = PALETTES[variant] ?? PALETTES.default;
 
-  const anim = reduce ? undefined : true;
+  const blob = (
+    color: string,
+    size: number,
+    pos: React.CSSProperties,
+    opacity: number,
+    keyframes: string,
+    duration: number,
+  ): React.CSSProperties => ({
+    ...pos,
+    width: size,
+    height: size,
+    opacity,
+    background: `radial-gradient(closest-side, ${color}, transparent 70%)`,
+    animationName: reduce ? "none" : keyframes,
+    animationDuration: `${duration}s`,
+  });
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
       aria-hidden
     >
       {/* Mouse-follow spotlight — translate-only, GPU composited. */}
-      {interactive && !reduce && (
+      {interactive && !reduce && spotlightOn && (
         <div
           ref={spotlightRef}
           className="absolute h-[400px] w-[600px] will-change-transform"
@@ -82,56 +117,38 @@ export default function AuroraBackground({
       )}
 
       {/* Aurora blobs — three is plenty; larger blur costs a lot per pixel. */}
-      <motion.div
-        className="absolute rounded-full"
-        style={{
-          width: 640,
-          height: 640,
-          left: "-8%",
-          top: "-12%",
-          filter: "blur(60px)",
-          opacity: 0.55,
-          background: `radial-gradient(closest-side, ${palette[0]}, transparent 70%)`,
-          mixBlendMode: "screen",
-        }}
-        animate={
-          anim ? { x: [0, 30, -20, 0], y: [0, -20, 20, 0] } : undefined
-        }
-        transition={{ duration: 26, repeat: Infinity, ease: "easeInOut" }}
+      <div
+        className="aurora-blob"
+        style={blob(
+          palette[0],
+          640,
+          { left: "-8%", top: "-12%" },
+          0.55,
+          "aurora-drift-a",
+          26,
+        )}
       />
-      <motion.div
-        className="absolute rounded-full"
-        style={{
-          width: 560,
-          height: 560,
-          right: "-6%",
-          top: "8%",
-          filter: "blur(60px)",
-          opacity: 0.5,
-          background: `radial-gradient(closest-side, ${palette[1]}, transparent 70%)`,
-          mixBlendMode: "screen",
-        }}
-        animate={
-          anim ? { x: [0, -25, 15, 0], y: [0, 15, -20, 0] } : undefined
-        }
-        transition={{ duration: 30, repeat: Infinity, ease: "easeInOut" }}
+      <div
+        className="aurora-blob"
+        style={blob(
+          palette[1],
+          560,
+          { right: "-6%", top: "8%" },
+          0.5,
+          "aurora-drift-b",
+          30,
+        )}
       />
-      <motion.div
-        className="absolute rounded-full"
-        style={{
-          width: 520,
-          height: 520,
-          left: "18%",
-          bottom: "-14%",
-          filter: "blur(60px)",
-          opacity: 0.45,
-          background: `radial-gradient(closest-side, ${palette[2]}, transparent 70%)`,
-          mixBlendMode: "screen",
-        }}
-        animate={
-          anim ? { x: [0, 25, -25, 0], y: [0, -15, 15, 0] } : undefined
-        }
-        transition={{ duration: 34, repeat: Infinity, ease: "easeInOut" }}
+      <div
+        className="aurora-blob"
+        style={blob(
+          palette[2],
+          520,
+          { left: "18%", bottom: "-14%" },
+          0.45,
+          "aurora-drift-c",
+          34,
+        )}
       />
 
       {/* Grid overlay (cheap paint, no filter). */}

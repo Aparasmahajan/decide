@@ -2,17 +2,23 @@
 
 import Link from "next/link";
 import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
-import { useRef } from "react";
+import { memo, useRef, useState } from "react";
 import type { EngineDef } from "@/lib/engines";
 import { cn } from "@/lib/cn";
 import { ArrowUpRight, Lock } from "lucide-react";
 
 type Props = { engine: EngineDef; index: number };
 
-export default function EngineTile({ engine, index }: Props) {
+function EngineTile({ engine, index }: Props) {
   const ref = useRef<HTMLAnchorElement>(null);
   const rafRef = useRef<number | null>(null);
   const hoveredRef = useRef(false);
+  // Drives `will-change` only while the tilt is actually live. Leaving
+  // `will-change: transform` on permanently pinned a GPU layer for every tile
+  // in the grid — 26 layers' worth of texture memory, allocated up front and
+  // never released, which is exactly the kind of thing that makes scrolling
+  // feel heavy on integrated graphics.
+  const [tilting, setTilting] = useState(false);
 
   // Motion values drive CSS transform on the GPU without React re-renders.
   const rx = useMotionValue(0);
@@ -24,6 +30,7 @@ export default function EngineTile({ engine, index }: Props) {
 
   const onEnter = () => {
     hoveredRef.current = true;
+    setTilting(true);
   };
 
   const onMove = (e: React.MouseEvent) => {
@@ -51,6 +58,10 @@ export default function EngineTile({ engine, index }: Props) {
     }
     rx.set(0);
     ry.set(0);
+    // Hold the layer just long enough for the spring to settle back to flat.
+    window.setTimeout(() => {
+      if (!hoveredRef.current) setTilting(false);
+    }, 400);
   };
 
   const soon = engine.status === "soon";
@@ -98,17 +109,20 @@ export default function EngineTile({ engine, index }: Props) {
             rotateX: rxs,
             rotateY: rys,
             transformStyle: "preserve-3d",
-            willChange: "transform",
+            willChange: tilting ? "transform" : undefined,
           }}
           className="relative h-full"
         >
-          {/* Glare — only paints when hovered (opacity toggles the layer). */}
-          <motion.div
-            className="pointer-events-none absolute inset-0 rounded-3xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-            style={{
-              background: `radial-gradient(300px 180px at ${glareX} ${glareY}, rgba(255,255,255,0.14), transparent 60%)`,
-            }}
-          />
+          {/* Glare — mounted only while hovered, so the gradient it repaints as
+              the pointer moves does not exist for the other 25 tiles. */}
+          {tilting && (
+            <motion.div
+              className="pointer-events-none absolute inset-0 rounded-3xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+              style={{
+                background: `radial-gradient(300px 180px at ${glareX} ${glareY}, rgba(255,255,255,0.14), transparent 60%)`,
+              }}
+            />
+          )}
 
           <div className="flex h-full flex-col justify-between gap-6">
             <div className="flex items-start justify-between">
@@ -159,3 +173,10 @@ export default function EngineTile({ engine, index }: Props) {
     </motion.div>
   );
 }
+
+/*
+ * The grid re-renders on every keystroke in the search box. Without memo, all
+ * matching tiles rebuild their subtree each time even though `engine` is a
+ * stable object from the ENGINES constant and only the *set* of tiles changed.
+ */
+export default memo(EngineTile);
