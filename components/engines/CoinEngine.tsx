@@ -1,15 +1,23 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import {
+  AnimatePresence,
+  animate,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+  type AnimationPlaybackControls,
+} from "framer-motion";
+import { useEffect, useRef, useState } from "react";
 import EngineShell, {
   BigActionButton,
   SidePanel,
 } from "@/components/EngineShell";
 import type { EngineDef } from "@/lib/engines";
 import { pushHistory, readConfig, writeConfig } from "@/lib/storage";
-import { pickWeighted } from "@/lib/random";
-import { Palette } from "lucide-react";
+import { pickWeighted, randomInt } from "@/lib/random";
+import { Crown, Palette, Star } from "lucide-react";
 
 type Side = "heads" | "tails";
 
@@ -64,8 +72,9 @@ const SKINS: Record<
   },
   glass: {
     name: "Glass",
-    face: "conic-gradient(from 210deg, rgba(255,255,255,0.6), rgba(255,255,255,0.15), rgba(255,255,255,0.4), rgba(255,255,255,0.6))",
-    edge: "linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.15))",
+    // Opaque enough that the far face can't show through the near one.
+    face: "conic-gradient(from 210deg, #e5e7eb, #f8fafc, #cbd5e1, #e5e7eb, #ffffff, #cbd5e1, #e5e7eb)",
+    edge: "linear-gradient(180deg, #cbd5e1, #94a3b8)",
     text: "#1f2937",
     accent: "#e5e7eb",
   },
@@ -85,16 +94,57 @@ const SKINS: Record<
   },
 };
 
+const COIN = 240;
+/** Half the coin's thickness, in px. Faces sit at ±this on the Z axis. */
+const HALF_THICK = 7;
+/** Rim discs filling the gap between the faces, so the coin has an edge. */
+const RIM_LAYERS = [-5, -2.5, 0, 2.5, 5];
+const TOSS_HEIGHT = 150;
+/** Whole flip, including the small bounce after landing. */
+const FLIP_S = 1.6;
+/** Fraction of FLIP_S at which the coin touches down and stops spinning. */
+const LAND_AT = 0.8;
+
 export default function CoinEngine({ engine }: { engine: EngineDef }) {
   const [cfg, setCfg] = useState<CoinConfig>(DEFAULT);
   const [result, setResult] = useState<Side | null>(null);
   const [flipping, setFlipping] = useState(false);
-  const [rotation, setRotation] = useState(0);
   const [flipCount, setFlipCount] = useState(0);
   const [stats, setStats] = useState({ heads: 0, tails: 0 });
+  const [streak, setStreak] = useState<{ side: Side; n: number } | null>(null);
+  const reduce = useReducedMotion();
+
+  /*
+   * The flip is driven by motion values rather than `animate` props + state.
+   * Nothing re-renders while the coin is in the air, and the result is revealed
+   * when the animation's own promise resolves — not by a setTimeout that has to
+   * be kept in sync with a transition duration by hand.
+   */
+  const rotX = useMotionValue(0);
+  const lift = useMotionValue(0);
+  const coinScale = useTransform(lift, [-TOSS_HEIGHT, 0], [1.12, 1]);
+  const shadowScale = useTransform(lift, [-TOSS_HEIGHT, 0], [0.45, 1]);
+  const shadowOpacity = useTransform(lift, [-TOSS_HEIGHT, 0], [0.2, 0.65]);
+
+  const running = useRef<AnimationPlaybackControls[]>([]);
+  const alive = useRef(true);
 
   useEffect(() => {
-    setCfg(readConfig<CoinConfig>(engine.slug, DEFAULT));
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      running.current.forEach((c) => c.stop());
+      running.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    const stored = readConfig<CoinConfig>(engine.slug, DEFAULT);
+    setCfg({
+      ...stored,
+      // Older saves (or hand-edited storage) may name a skin that no longer exists.
+      skin: stored.skin in SKINS ? stored.skin : DEFAULT.skin,
+    });
   }, [engine.slug]);
 
   const setAndPersist = (patch: Partial<CoinConfig>) => {
@@ -106,32 +156,64 @@ export default function CoinEngine({ engine }: { engine: EngineDef }) {
   };
 
   const skin = SKINS[cfg.skin];
+  const headsLabel = cfg.headsLabel.trim() || DEFAULT.headsLabel;
+  const tailsLabel = cfg.tailsLabel.trim() || DEFAULT.tailsLabel;
+  const labelOf = (s: Side) => (s === "heads" ? headsLabel : tailsLabel);
 
-  const flip = () => {
+  const flip = async () => {
     if (flipping) return;
     const outcome = pickWeighted<Side>([
       { value: "heads", weight: Math.max(0.001, cfg.headsWeight) },
       { value: "tails", weight: Math.max(0.001, cfg.tailsWeight) },
     ]);
+    const label = labelOf(outcome);
     setFlipping(true);
     setResult(null);
-    const spins = 6 + Math.floor(Math.random() * 3);
-    const finalRot = spins * 180 + (outcome === "heads" ? 0 : 180);
-    setRotation((r) => r + finalRot);
     setFlipCount((c) => c + 1);
-    setTimeout(() => {
-      setFlipping(false);
-      setResult(outcome);
-      setStats((s) => ({
-        ...s,
-        [outcome]: s[outcome] + 1,
-      }));
-      pushHistory({
-        engineId: engine.slug,
-        outcome:
-          outcome === "heads" ? cfg.headsLabel : cfg.tailsLabel,
-      });
-    }, 2200);
+
+    /*
+     * Heads faces the viewer at rotateX ≡ 0 (mod 360), tails at ≡ 180.
+     *
+     * The old code added `spins * 180 + (tails ? 180 : 0)` to the running
+     * rotation. Whenever `spins` came out odd that added an extra half-turn, so
+     * the coin landed on the opposite face from the result it announced. Here
+     * the target is an absolute angle whose residue *is* the outcome, so the
+     * face shown can't disagree with the result.
+     *
+     * The start is first folded back into [0, 360). That's visually identical,
+     * and keeps the angle from growing without bound over a long session.
+     */
+    const start = ((rotX.get() % 360) + 360) % 360;
+    rotX.jump(start);
+    const target =
+      (reduce ? 1 : randomInt(4, 6)) * 360 + (outcome === "heads" ? 0 : 180);
+
+    const dur = reduce ? 0.4 : FLIP_S;
+    const spin = animate(rotX, target, {
+      duration: reduce ? dur : dur * LAND_AT,
+      // Fast flick off the thumb, then a long, smooth settle.
+      ease: [0.15, 0.5, 0.35, 1],
+    });
+    const toss = reduce
+      ? null
+      : animate(lift, [0, -TOSS_HEIGHT, 0, -12, 0], {
+          duration: dur,
+          times: [0, LAND_AT / 2, LAND_AT, (LAND_AT + 1) / 2, 1],
+          ease: ["easeOut", "easeIn", "easeOut", "easeIn"],
+        });
+    running.current = toss ? [spin, toss] : [spin];
+
+    await Promise.all(running.current);
+    if (!alive.current) return;
+    running.current = [];
+
+    setFlipping(false);
+    setResult(outcome);
+    setStats((s) => ({ ...s, [outcome]: s[outcome] + 1 }));
+    setStreak((s) =>
+      s && s.side === outcome ? { side: outcome, n: s.n + 1 } : { side: outcome, n: 1 },
+    );
+    pushHistory({ engineId: engine.slug, outcome: label });
   };
 
   const total = stats.heads + stats.tails;
@@ -147,11 +229,13 @@ export default function CoinEngine({ engine }: { engine: EngineDef }) {
               <LabeledInput
                 label="Heads"
                 value={cfg.headsLabel}
+                placeholder={DEFAULT.headsLabel}
                 onChange={(v) => setAndPersist({ headsLabel: v })}
               />
               <LabeledInput
                 label="Tails"
                 value={cfg.tailsLabel}
+                placeholder={DEFAULT.tailsLabel}
                 onChange={(v) => setAndPersist({ tailsLabel: v })}
               />
             </div>
@@ -160,35 +244,50 @@ export default function CoinEngine({ engine }: { engine: EngineDef }) {
           <SidePanel title="Weight">
             <div className="space-y-4">
               <RangeSlider
-                label={`${cfg.headsLabel}`}
+                label={headsLabel}
                 value={cfg.headsWeight}
                 onChange={(v) => setAndPersist({ headsWeight: v })}
               />
               <RangeSlider
-                label={`${cfg.tailsLabel}`}
+                label={tailsLabel}
                 value={cfg.tailsWeight}
                 onChange={(v) => setAndPersist({ tailsWeight: v })}
               />
-              <p className="text-[11px] text-white/40">
-                Effective odds:{" "}
-                {formatPct(cfg.headsWeight, cfg.tailsWeight)} /{" "}
-                {formatPct(cfg.tailsWeight, cfg.headsWeight)}
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-white/40">
+                  Effective odds:{" "}
+                  {formatPct(cfg.headsWeight, cfg.tailsWeight)} /{" "}
+                  {formatPct(cfg.tailsWeight, cfg.headsWeight)}
+                </p>
+                {(cfg.headsWeight !== 1 || cfg.tailsWeight !== 1) && (
+                  <button
+                    onClick={() => setAndPersist({ headsWeight: 1, tailsWeight: 1 })}
+                    className="rounded-lg px-2 py-1 text-[11px] text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
+                  >
+                    Reset to fair
+                  </button>
+                )}
+              </div>
             </div>
           </SidePanel>
 
           <SidePanel title="Session stats">
             <div className="flex items-center justify-between text-sm">
-              <StatCell label={cfg.headsLabel} value={stats.heads} total={total} accent="#facc15" />
-              <StatCell label={cfg.tailsLabel} value={stats.tails} total={total} accent="#f472b6" />
+              <StatCell label={headsLabel} value={stats.heads} total={total} accent="#facc15" />
+              <StatCell label={tailsLabel} value={stats.tails} total={total} accent="#f472b6" />
             </div>
+            {streak && streak.n > 1 && (
+              <p className="mt-4 truncate text-xs text-white/50">
+                Streak: <span className="text-white/80">{streak.n}× {labelOf(streak.side)}</span>
+              </p>
+            )}
           </SidePanel>
         </>
       }
     >
       <div className="flex h-full flex-col items-center justify-between gap-10">
         {/* Skin picker */}
-        <div className="flex w-full items-center justify-between">
+        <div className="flex w-full flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-white/60">
             <Palette className="h-4 w-4" />
             <span className="text-xs uppercase tracking-widest">Skin</span>
@@ -211,78 +310,91 @@ export default function CoinEngine({ engine }: { engine: EngineDef }) {
           </div>
         </div>
 
-        {/* Coin */}
-        <div className="perspective-1000 relative flex-1 grid place-items-center w-full">
-          {/*
-            No `key={flipCount}` here. Keying on the flip counter tore down and
-            rebuilt the coin on every flip, which meant re-rasterizing two
-            240px conic-gradient faces plus their inset shadows and 60px glow
-            from scratch at the exact frame the spin started — a visible hitch
-            on the first frame of every flip. `rotation` only ever increases, so
-            animating it directly gives the same motion and lets the browser
-            keep the already-painted faces.
-          */}
-          <motion.div
-            aria-live="polite"
-            className="preserve-3d relative"
-            style={{
-              width: 240,
-              height: 240,
-              willChange: flipping ? "transform" : undefined,
-            }}
-            animate={{ rotateX: rotation }}
-            transition={{
-              duration: 2.2,
-              ease: [0.16, 0.84, 0.28, 1],
-            }}
+        {/* Coin — headroom above for the toss arc. */}
+        <div className="relative grid w-full flex-1 place-items-center pt-24">
+          <div
+            className="perspective-1000 relative"
+            style={{ width: COIN, height: COIN }}
           >
-            <CoinFace label={cfg.headsLabel} skin={skin} kind="H" />
-            <CoinFace label={cfg.tailsLabel} skin={skin} kind="T" flipped />
-            {/* Edge */}
-            <div
-              className="absolute inset-0 rounded-full"
+            {/*
+              Ambient glow and ground shadow live outside the rotating element.
+              As a `box-shadow` on the faces they spun round with the coin, and
+              were re-rasterized with each face's layer.
+            */}
+            <motion.div
+              aria-hidden
+              className="pointer-events-none absolute inset-4 rounded-full opacity-40 blur-2xl"
+              style={{ background: skin.accent, y: lift, willChange: "transform" }}
+            />
+            <motion.div
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 h-6 rounded-full"
               style={{
-                background: skin.edge,
-                transform: "rotateY(90deg) translateZ(0)",
-                width: "100%",
-                height: 24,
-                top: "50%",
-                marginTop: -12,
-                opacity: 0.6,
+                width: COIN * 0.8,
+                marginLeft: -COIN * 0.4,
+                top: COIN + 18,
+                background: `radial-gradient(closest-side, rgba(0,0,0,0.7), transparent)`,
+                scaleX: shadowScale,
+                opacity: shadowOpacity,
+                willChange: "transform, opacity",
               }}
             />
-          </motion.div>
 
-          {/* Landing glow */}
-          <div
-            className="pointer-events-none absolute bottom-6 h-6 w-56 rounded-full opacity-60 blur-2xl"
-            style={{
-              background: `radial-gradient(closest-side, ${skin.accent}, transparent 70%)`,
-            }}
-          />
+            {/*
+              `will-change` is set permanently. Toggling it on at the start of a
+              flip and off at the end made the browser create the layer on the
+              first frame of the spin and throw it away on landing — a hitch at
+              both ends.
+            */}
+            <motion.div
+              className="preserve-3d absolute inset-0"
+              style={{
+                y: lift,
+                rotateX: rotX,
+                scale: coinScale,
+                willChange: "transform",
+              }}
+            >
+              {RIM_LAYERS.map((z) => (
+                <div
+                  key={z}
+                  aria-hidden
+                  className="absolute inset-0 rounded-full"
+                  style={{
+                    background: skin.edge,
+                    transform: `translateZ(${z}px)`,
+                  }}
+                />
+              ))}
+              <CoinFace label={headsLabel} skin={skin} side="heads" />
+              <CoinFace label={tailsLabel} skin={skin} side="tails" />
+            </motion.div>
+          </div>
         </div>
 
-        {/* Result */}
+        {/* Result — fixed height so the button doesn't jump when it appears. */}
         <div className="flex flex-col items-center gap-6">
-          <AnimatePresence mode="wait">
-            {result && !flipping && (
-              <motion.div
-                key={result + flipCount}
-                initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ type: "spring", stiffness: 300 }}
-                className="text-center"
-              >
-                <p className="text-xs uppercase tracking-[0.24em] text-white/50">
-                  Result
-                </p>
-                <p className="mt-1 text-4xl font-semibold tracking-tight text-white">
-                  {result === "heads" ? cfg.headsLabel : cfg.tailsLabel}
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div className="grid h-[76px] place-items-center" aria-live="polite">
+            <AnimatePresence mode="wait">
+              {result && !flipping && (
+                <motion.div
+                  key={flipCount}
+                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -6, transition: { duration: 0.12 } }}
+                  transition={{ type: "spring", stiffness: 300, damping: 24 }}
+                  className="text-center"
+                >
+                  <p className="text-xs uppercase tracking-[0.24em] text-white/50">
+                    Result
+                  </p>
+                  <p className="mt-1 max-w-[80vw] truncate text-4xl font-semibold tracking-tight text-white">
+                    {labelOf(result)}
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <BigActionButton
             label={flipping ? "Flipping…" : "Flip the coin"}
             onClick={flip}
@@ -299,51 +411,57 @@ export default function CoinEngine({ engine }: { engine: EngineDef }) {
 function CoinFace({
   label,
   skin,
-  kind,
-  flipped,
+  side,
 }: {
   label: string;
   skin: (typeof SKINS)[SkinKey];
-  kind: "H" | "T";
-  flipped?: boolean;
+  side: Side;
 }) {
+  const Icon = side === "heads" ? Crown : Star;
   return (
     <div
       className="backface-hidden absolute inset-0 grid place-items-center rounded-full"
       style={{
         background: skin.face,
-        boxShadow: `inset 0 0 40px rgba(0,0,0,0.25), 0 30px 60px -20px rgba(0,0,0,0.5), 0 0 60px ${skin.accent}55`,
-        transform: flipped ? "rotateX(180deg)" : "rotateX(0deg)",
+        boxShadow: "inset 0 0 40px rgba(0,0,0,0.25)",
+        /*
+         * The two faces used to share the same plane (z = 0), so the browser
+         * had no depth to sort them by and either could win on a given frame —
+         * the "Heads" face could paint over a coin that had landed tails.
+         * Pushing them apart by the coin's thickness makes the order exact.
+         */
+        transform:
+          side === "heads"
+            ? `translateZ(${HALF_THICK}px)`
+            : `rotateX(180deg) translateZ(${HALF_THICK}px)`,
         color: skin.text,
       }}
     >
-      <div className="relative grid place-items-center">
-        <div
-          className="absolute inset-0 rounded-full"
-          style={{
-            background:
-              "radial-gradient(closest-side, rgba(255,255,255,0.5), transparent 70%)",
-            mixBlendMode: "overlay",
-            width: 220,
-            height: 220,
-            left: -110,
-            top: -110,
-          }}
-        />
-        <div
-          className="grid h-40 w-40 place-items-center rounded-full border-2"
-          style={{
-            borderColor: `${skin.text}22`,
-            background: `${skin.accent}22`,
-          }}
-        >
-          <div className="text-center">
-            <div className="text-[10px] font-mono uppercase tracking-[0.4em] opacity-70">
-              {kind === "H" ? "OBVERSE" : "REVERSE"}
-            </div>
-            <div className="mt-1 max-w-[9rem] truncate text-center text-2xl font-bold tracking-tight">
-              {label}
-            </div>
+      {/* Sheen. A plain gradient — a blend mode here forced a backdrop read on every frame of the spin. */}
+      <div
+        aria-hidden
+        className="absolute inset-3 rounded-full"
+        style={{
+          background:
+            "radial-gradient(circle at 35% 30%, rgba(255,255,255,0.45), transparent 55%)",
+        }}
+      />
+      <div
+        className="relative grid h-40 w-40 place-items-center rounded-full border-2"
+        style={{
+          borderColor: `${skin.text}22`,
+          background: `${skin.accent}22`,
+        }}
+      >
+        <div className="flex flex-col items-center text-center">
+          <Icon className="h-5 w-5 opacity-70" strokeWidth={2.25} />
+          <div
+            className={
+              "mt-1 max-w-[9rem] truncate text-center font-bold tracking-tight " +
+              (label.length > 10 ? "text-lg" : "text-2xl")
+            }
+          >
+            {label}
           </div>
         </div>
       </div>
@@ -354,10 +472,12 @@ function CoinFace({
 function LabeledInput({
   label,
   value,
+  placeholder,
   onChange,
 }: {
   label: string;
   value: string;
+  placeholder?: string;
   onChange: (v: string) => void;
 }) {
   return (
@@ -367,8 +487,10 @@ function LabeledInput({
       </span>
       <input
         value={value}
-        onChange={(e) => onChange(e.target.value.slice(0, 24))}
-        className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition-colors focus:border-white/25 focus:bg-white/10"
+        placeholder={placeholder}
+        maxLength={24}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition-colors placeholder:text-white/30 focus:border-white/25 focus:bg-white/10"
       />
     </label>
   );
@@ -386,7 +508,7 @@ function RangeSlider({
   return (
     <div>
       <div className="flex items-center justify-between text-[12px] text-white/70">
-        <span>{label}</span>
+        <span className="truncate">{label}</span>
         <span className="tabular-nums text-white/50">{value.toFixed(2)}</span>
       </div>
       <input
@@ -415,7 +537,7 @@ function StatCell({
 }) {
   const pct = total === 0 ? 0 : Math.round((value / total) * 100);
   return (
-    <div className="flex-1">
+    <div className="min-w-0 flex-1">
       <div
         className="text-2xl font-semibold tabular-nums"
         style={{ color: accent }}
@@ -430,8 +552,12 @@ function StatCell({
   );
 }
 
+/*
+ * Mirrors `pickWeighted` above, which floors each weight at 0.001 — so two
+ * zero weights are a fair coin, and a single zero weight is (very nearly) 0%.
+ */
 function formatPct(a: number, b: number) {
-  const t = a + b;
-  if (t === 0) return "50%";
-  return `${Math.round((a / t) * 100)}%`;
+  const wa = Math.max(0.001, a);
+  const wb = Math.max(0.001, b);
+  return `${Math.round((wa / (wa + wb)) * 100)}%`;
 }

@@ -28,7 +28,10 @@ export default function Confetti({ count = 90, duration = 2400 }: Props) {
     if (!canvas) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
-    const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
+    // Not `desynchronized`: a low-latency canvas can present outside the
+    // compositor's frame, which tears and flickers against the DOM animating
+    // underneath it — exactly where the result is being revealed.
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -77,10 +80,17 @@ export default function Confetti({ count = 90, duration = 2400 }: Props) {
 
     let raf = 0;
     let start = 0;
+    let prev = 0;
 
     const frame = (now: number) => {
-      if (!start) start = now;
+      if (!start) start = prev = now;
       const elapsed = now - start;
+      // Physics is tuned per 60Hz frame. Scale by real elapsed time so the
+      // burst falls at the same speed on 120Hz screens (where it ran 2x fast)
+      // and doesn't stall on a dropped frame. Capped so a backgrounded tab
+      // doesn't teleport every piece off-screen on return.
+      const k = Math.min(3, (now - prev) / (1000 / 60));
+      prev = now;
       // Fade the whole burst out over its final third.
       const fade = Math.min(1, Math.max(0, (duration - elapsed) / (duration / 3)));
 
@@ -90,10 +100,10 @@ export default function Confetti({ count = 90, duration = 2400 }: Props) {
       for (let i = 0; i < pieces.length; i++) {
         const p = pieces[i];
         if (elapsed < p.delay) continue;
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += 0.03; // gravity
-        p.rot += p.vr;
+        p.x += p.vx * k;
+        p.y += p.vy * k;
+        p.vy += 0.03 * k; // gravity
+        p.rot += p.vr * k;
         if (p.y > h + 40) continue;
 
         ctx.save();

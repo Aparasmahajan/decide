@@ -112,7 +112,7 @@ export default function HomePage() {
             </a>
             <button
               onClick={surprise}
-              className="group inline-flex items-center gap-2 rounded-full bg-white/5 px-6 py-3 text-sm font-medium text-white ring-1 ring-white/15 backdrop-blur transition-colors hover:bg-white/10"
+              className="group inline-flex items-center gap-2 rounded-full bg-white/5 px-6 py-3 text-sm font-medium text-white ring-1 ring-white/15 transition-colors hover:bg-white/10"
             >
               <Wand2 className="h-4 w-4 text-fuchsia-300 transition-transform group-hover:-rotate-12" />
               Surprise me

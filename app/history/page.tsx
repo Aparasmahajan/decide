@@ -6,17 +6,33 @@ import { motion } from "framer-motion";
 import { Trash2 } from "lucide-react";
 import AuroraBackground from "@/components/AuroraBackground";
 import Nav from "@/components/Nav";
-import { clearHistory, readHistory, type HistoryEntry } from "@/lib/storage";
+import {
+  clearHistory,
+  readHistory,
+  subscribeHistory,
+  type HistoryEntry,
+} from "@/lib/storage";
 import { ENGINES, findEngine } from "@/lib/engines";
 
 export default function HistoryPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [engineFilter, setEngineFilter] = useState<string>("all");
-  const [tick, setTick] = useState(0);
-
   useEffect(() => {
-    setHistory(readHistory());
-  }, [tick]);
+    const sync = () => setHistory(readHistory());
+    sync();
+    return subscribeHistory(sync);
+  }, []);
+
+  // A filter chip disappears once its engine has no entries left (e.g. cleared
+  // from that engine's page in another tab) — don't leave the list stuck on it.
+  useEffect(() => {
+    if (
+      engineFilter !== "all" &&
+      !history.some((h) => h.engineId === engineFilter)
+    ) {
+      setEngineFilter("all");
+    }
+  }, [history, engineFilter]);
 
   const filtered =
     engineFilter === "all"
@@ -61,10 +77,7 @@ export default function HistoryPage() {
           })}
           {history.length > 0 && (
             <button
-              onClick={() => {
-                clearHistory();
-                setTick((t) => t + 1);
-              }}
+              onClick={() => clearHistory()}
               className="ml-auto inline-flex items-center gap-1 rounded-full bg-red-500/10 px-4 py-1.5 text-xs text-red-300 ring-1 ring-red-500/20 hover:bg-red-500/20"
             >
               <Trash2 className="h-3 w-3" />

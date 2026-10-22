@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import EngineShell, {
   BigActionButton,
   SidePanel,
@@ -84,23 +84,61 @@ type ValueConfig = {
 
 const newId = () => Math.random().toString(36).slice(2, 9);
 
+const EASE: [number, number, number, number] = [0.22, 0.9, 0.28, 1];
+
+/*
+ * Default ids are fixed strings. This module is evaluated once on the server
+ * and again in the browser, so `newId()` here gave the same rows different
+ * ids on each side of hydration.
+ */
 const DEFAULT: ValueConfig = {
   family: "weight",
   currency: "₹",
   items: [
-    { id: newId(), label: "Maggi 30g", price: "10", qty: "30", unit: "g" },
-    { id: newId(), label: "Maggi 60g", price: "15", qty: "60", unit: "g" },
-    { id: newId(), label: "Maggi 90g", price: "25", qty: "90", unit: "g" },
+    { id: "d1", label: "Maggi 30g", price: "10", qty: "30", unit: "g" },
+    { id: "d2", label: "Maggi 60g", price: "15", qty: "60", unit: "g" },
+    { id: "d3", label: "Maggi 90g", price: "25", qty: "90", unit: "g" },
   ],
 };
 
+/*
+ * Stored configs are trusted only as far as their shape. An unknown family
+ * key would make `FAMILIES[cfg.family]` undefined and crash the first render,
+ * and a row missing a field would crash `.trim()` in the ranking memo.
+ */
+function normalize(c: ValueConfig): ValueConfig {
+  const family = (Object.keys(FAMILIES) as FamilyKey[]).includes(c.family)
+    ? c.family
+    : DEFAULT.family;
+  const items = Array.isArray(c.items)
+    ? c.items.map((it) => ({
+        id: typeof it?.id === "string" ? it.id : newId(),
+        label: String(it?.label ?? ""),
+        price: String(it?.price ?? ""),
+        qty: String(it?.qty ?? ""),
+        unit: String(it?.unit ?? ""),
+      }))
+    : DEFAULT.items;
+  const currency = typeof c.currency === "string" ? c.currency : DEFAULT.currency;
+  return { family, currency, items };
+}
+
 export default function ValueEngine({ engine }: { engine: EngineDef }) {
   const [cfg, setCfg] = useState<ValueConfig>(DEFAULT);
-  const [saved, setSaved] = useState<string | null>(null);
+  /* The exact verdict text last saved, so the same verdict can't be saved twice. */
+  const [saved, setSaved] = useState<{ id: string; text: string } | null>(null);
+  const savedTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    setCfg(readConfig<ValueConfig>(engine.slug, DEFAULT));
+    setCfg(normalize(readConfig<ValueConfig>(engine.slug, DEFAULT)));
   }, [engine.slug]);
+
+  useEffect(
+    () => () => {
+      if (savedTimer.current !== null) clearTimeout(savedTimer.current);
+    },
+    [],
+  );
 
   const persist = (next: ValueConfig) => {
     setCfg(next);
@@ -195,27 +233,44 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
   };
 
   const setFamily = (key: FamilyKey) => {
+    if (key === cfg.family) return;
     // Units are family-scoped, so carrying "kg" into Volume would be
-    // meaningless. Reset every row to the new family's base unit.
-    const base = FAMILIES[key].units[0].key;
+    // meaningless. Each row moves to the unit worth the same number of base
+    // units (kg -> L, g -> ml), falling back to the base unit. Resetting
+    // everything to the base unit turned "1 kg vs 500 g" into "1 ml vs
+    // 500 ml" — the classic fix-the-family-after-typing flow silently
+    // inverted the verdict.
+    const from = FAMILIES[cfg.family];
+    const to = FAMILIES[key];
     persist({
       ...cfg,
       family: key,
-      items: cfg.items.map((i) => ({ ...i, unit: base })),
+      items: cfg.items.map((i) => {
+        const factor = from.units.find((u) => u.key === i.unit)?.factor ?? 1;
+        const unit = to.units.find((u) => u.factor === factor) ?? to.units[0];
+        return { ...i, unit: unit.key };
+      }),
     });
   };
 
+  const verdict = ranked.winner
+    ? `${ranked.winner.label} — ${money(ranked.winner.perDisplay, cfg.currency)}/${family.display.label}`
+    : null;
+  /* "Saved" only while the verdict on screen is the one that was saved; any
+     edit that changes it re-arms the button immediately. */
+  const isSaved = saved !== null && saved.text === verdict;
+
   const saveVerdict = () => {
     const w = ranked.winner;
-    if (!w) return;
-    const text = `${w.label} — ${money(w.perDisplay, cfg.currency)}/${family.display.label}`;
+    if (!w || !verdict || isSaved) return;
     pushHistory({
       engineId: engine.slug,
-      outcome: text,
+      outcome: verdict,
       meta: { comparedAgainst: ranked.competing },
     });
-    setSaved(w.id);
-    window.setTimeout(() => setSaved(null), 1600);
+    setSaved({ id: w.id, text: verdict });
+    if (savedTimer.current !== null) clearTimeout(savedTimer.current);
+    savedTimer.current = window.setTimeout(() => setSaved(null), 1600);
   };
 
   return (
@@ -239,12 +294,16 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
                           setItem(it.id, { label: e.target.value.slice(0, 32) })
                         }
                         placeholder="Name"
+                        aria-label="Item name"
                         className="min-w-0 flex-1 rounded-lg bg-transparent px-1 py-1 text-sm text-white outline-none placeholder:text-white/30"
                       />
+                      {/* Hidden until hover only where hover exists — on a
+                          touch screen there is no hover, so the delete
+                          button was invisible (though still tappable). */}
                       <button
                         onClick={() => removeItem(it.id)}
                         aria-label={`Remove ${it.label || "item"}`}
-                        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-white/40 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-300 focus-visible:opacity-100 group-hover:opacity-100"
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-white/40 transition-all hover:bg-red-500/10 hover:text-red-300 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:hover)]:opacity-0"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -261,7 +320,7 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
                           }
                           inputMode="decimal"
                           placeholder="Price"
-                          aria-label="Price"
+                          aria-label={`Price of ${it.label || "item"}`}
                           className="w-full min-w-0 bg-transparent text-right text-sm tabular-nums text-white outline-none placeholder:text-white/30"
                         />
                       </div>
@@ -274,7 +333,7 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
                           }
                           inputMode="decimal"
                           placeholder="Qty"
-                          aria-label="Quantity"
+                          aria-label={`Quantity of ${it.label || "item"}`}
                           className="w-full min-w-0 bg-transparent text-right text-sm tabular-nums text-white outline-none placeholder:text-white/30"
                         />
                         <select
@@ -282,7 +341,7 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
                           onChange={(e) =>
                             setItem(it.id, { unit: e.target.value })
                           }
-                          aria-label="Unit"
+                          aria-label={`Unit for ${it.label || "item"}`}
                           className="shrink-0 bg-transparent text-xs text-white/60 outline-none"
                         >
                           {family.units.map((u) => (
@@ -368,20 +427,27 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
         ) : (
           <div className="flex flex-1 flex-col gap-8">
             {/* Verdict */}
+            {/*
+              Keyed on the winner alone. Keying on `id + perBase` remounted
+              the verdict on every keystroke in the winner's price or
+              quantity, so while you typed it blinked to transparent and
+              faded back in once per character. Now it re-enters only when a
+              different option takes the lead; edits just update the text.
+            */}
             <AnimatePresence mode="wait">
               {ranked.winner && (
                 <motion.div
-                  key={ranked.winner.id + ranked.winner.perBase}
+                  key={ranked.winner.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.35, ease: [0.22, 0.9, 0.28, 1] }}
+                  transition={{ duration: 0.35, ease: EASE }}
                   className="text-center"
                 >
                   <div className="inline-flex items-center gap-2 rounded-full bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300 ring-1 ring-emerald-400/25">
                     <Crown className="h-3.5 w-3.5" />
                     Best value
                   </div>
-                  <p className="mt-3 text-4xl font-semibold tracking-tight text-white">
+                  <p className="mt-3 break-words text-4xl font-semibold tracking-tight text-white">
                     {ranked.winner.label}
                   </p>
                   <p className="mt-2 text-lg tabular-nums text-white/70">
@@ -414,7 +480,7 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
                   currency={cfg.currency}
                   displayLabel={family.display.label}
                   baseUnit={family.base}
-                  justSaved={saved === r.id}
+                  justSaved={isSaved && saved?.id === r.id}
                 />
               ))}
             </ul>
@@ -423,7 +489,7 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
 
         <div className="flex flex-col items-center gap-3">
           <BigActionButton
-            label={saved ? "Saved to history" : "Save this verdict"}
+            label={isSaved ? "Saved to history" : "Save this verdict"}
             onClick={saveVerdict}
             disabled={!ranked.winner}
             color="#10b981"
@@ -470,16 +536,28 @@ function RankRow({
   baseUnit: string;
   justSaved: boolean;
 }) {
+  /*
+   * Rows re-sort as you type. `layout="position"` glides a row to its new
+   * rank (a transform, measured once per edit) instead of teleporting there
+   * while its cost bar is still easing — which read as the bars jumping.
+   * Position-only, so the bar and text inside are never scale-distorted.
+   */
   if (!row.valid) {
     return (
-      <li className="flex items-center justify-between rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-white/35 ring-1 ring-white/5">
+      <motion.li
+        layout="position"
+        transition={{ duration: 0.35, ease: EASE }}
+        className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-white/35 ring-1 ring-white/5"
+      >
         <span className="truncate">{row.label}</span>
-        <span className="text-xs">needs a price and quantity</span>
-      </li>
+        <span className="shrink-0 text-xs">needs a price and quantity</span>
+      </motion.li>
     );
   }
 
-  const isBest = row.perBase === best;
+  /* Equal unit prices can differ in the last float bit (they're computed
+     through different unit factors); a true tie should read as a tie. */
+  const isBest = row.perBase <= best * (1 + 1e-9);
   /* The fraction the whole tool exists to surface: how this option's unit
      price compares to the cheapest one. 1.00x is the winner. */
   const ratio = best > 0 ? row.perBase / best : 1;
@@ -489,7 +567,9 @@ function RankRow({
   const fill = worst > 0 ? row.perBase / worst : 1;
 
   return (
-    <li
+    <motion.li
+      layout="position"
+      transition={{ duration: 0.35, ease: EASE }}
       className={
         "relative overflow-hidden rounded-2xl px-4 py-3 ring-1 transition-colors " +
         (isBest
@@ -509,7 +589,7 @@ function RankRow({
         }}
         initial={false}
         animate={{ scaleX: fill }}
-        transition={{ duration: 0.45, ease: [0.22, 0.9, 0.28, 1] }}
+        transition={{ duration: 0.45, ease: EASE }}
       />
 
       <div className="relative flex items-center gap-3">
@@ -564,7 +644,7 @@ function RankRow({
           )}
         </div>
       </div>
-    </li>
+    </motion.li>
   );
 }
 

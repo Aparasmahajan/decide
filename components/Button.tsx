@@ -57,11 +57,10 @@ const Button = forwardRef<HTMLButtonElement, Props>(function Button(
     >
       {variant === "primary" && (
         <span
-          className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-60"
+          className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-40"
           style={{
             background:
               "linear-gradient(180deg, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0) 40%)",
-            mixBlendMode: "overlay",
           }}
         />
       )}
