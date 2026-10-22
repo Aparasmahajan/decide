@@ -22,6 +22,7 @@ const ENGINE_COMPONENTS: Record<string, ComponentType<EngineProps>> = {
   coin: dynamic(() => import("./CoinEngine")),
   dice: dynamic(() => import("./DiceEngine")),
   wheel: dynamic(() => import("./WheelEngine")),
+  roulette: dynamic(() => import("./RouletteEngine")),
   bottle: dynamic(() => import("./BottleEngine")),
   person: dynamic(() => import("./PersonEngine")),
   magic8: dynamic(() => import("./Magic8Engine")),

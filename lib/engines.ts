@@ -47,6 +47,16 @@ export const ENGINES: EngineDef[] = [
     category: "Classics",
   },
   {
+    slug: "roulette",
+    name: "Roulette",
+    tagline: "Red or black? Place your bet.",
+    emoji: "🎰",
+    color: "#dc2626",
+    color2: "#16a34a",
+    status: "live",
+    category: "Play",
+  },
+  {
     slug: "bottle",
     name: "Bottle Spin",
     tagline: "Physics-based. Whoever it points to.",

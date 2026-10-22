@@ -18,7 +18,7 @@ import { Plus, Trash2, Crown, TrendingDown } from "lucide-react";
  * how many base units it is worth, and all maths runs in base units.
  * ------------------------------------------------------------------ */
 
-type FamilyKey = "weight" | "volume" | "count";
+type FamilyKey = "weight" | "volume" | "length" | "count";
 
 type Family = {
   name: string;
@@ -34,8 +34,11 @@ const FAMILIES: Record<FamilyKey, Family> = {
     name: "Weight",
     base: "g",
     units: [
+      { key: "mg", label: "mg", factor: 0.001 },
       { key: "g", label: "g", factor: 1 },
       { key: "kg", label: "kg", factor: 1000 },
+      { key: "oz", label: "oz", factor: 28.349523125 },
+      { key: "lb", label: "lb", factor: 453.59237 },
     ],
     display: { label: "100 g", factor: 100 },
   },
@@ -45,14 +48,28 @@ const FAMILIES: Record<FamilyKey, Family> = {
     units: [
       { key: "ml", label: "ml", factor: 1 },
       { key: "L", label: "L", factor: 1000 },
+      { key: "floz", label: "fl oz", factor: 29.5735295625 },
+      { key: "gal", label: "gal", factor: 3785.411784 },
     ],
     display: { label: "100 ml", factor: 100 },
+  },
+  length: {
+    name: "Length",
+    base: "cm",
+    units: [
+      { key: "cm", label: "cm", factor: 1 },
+      { key: "m", label: "m", factor: 100 },
+      { key: "in", label: "in", factor: 2.54 },
+      { key: "ft", label: "ft", factor: 30.48 },
+    ],
+    display: { label: "metre", factor: 100 },
   },
   count: {
     name: "Count",
     base: "pc",
     units: [
       { key: "pc", label: "pc", factor: 1 },
+      { key: "pair", label: "pair", factor: 2 },
       { key: "dozen", label: "dozen", factor: 12 },
     ],
     display: { label: "piece", factor: 1 },
@@ -95,11 +112,14 @@ const DEFAULT: ValueConfig = {
   family: "weight",
   currency: "₹",
   items: [
-    { id: "d1", label: "Maggi 30g", price: "10", qty: "30", unit: "g" },
-    { id: "d2", label: "Maggi 60g", price: "15", qty: "60", unit: "g" },
-    { id: "d3", label: "Maggi 90g", price: "25", qty: "90", unit: "g" },
+    { id: "d1", label: "Small pack", price: "10", qty: "30", unit: "g" },
+    { id: "d2", label: "Medium pack", price: "15", qty: "60", unit: "g" },
+    { id: "d3", label: "Large pack", price: "25", qty: "90", unit: "g" },
   ],
 };
+
+/** Labels of the brand-specific example rows earlier versions shipped with. */
+const OLD_EXAMPLE_LABELS = ["Maggi 30g", "Maggi 60g", "Maggi 90g"];
 
 /*
  * Stored configs are trusted only as far as their shape. An unknown family
@@ -107,6 +127,15 @@ const DEFAULT: ValueConfig = {
  * and a row missing a field would crash `.trim()` in the ranking memo.
  */
 function normalize(c: ValueConfig): ValueConfig {
+  // Untouched old example rows are swapped for the generic ones; anything the
+  // user edited is kept as-is.
+  if (
+    Array.isArray(c.items) &&
+    c.items.length === OLD_EXAMPLE_LABELS.length &&
+    c.items.every((it, i) => it?.label === OLD_EXAMPLE_LABELS[i])
+  ) {
+    c = { ...c, items: DEFAULT.items };
+  }
   const family = (Object.keys(FAMILIES) as FamilyKey[]).includes(c.family)
     ? c.family
     : DEFAULT.family;
@@ -157,7 +186,8 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
 
     const rows = cfg.items.map((it) => {
       const unit =
-        fam.units.find((u) => u.key === it.unit) ?? fam.units[0];
+        fam.units.find((u) => u.key === it.unit) ??
+        fam.units.find((u) => u.key === fam.base)!;
       const price = parseFloat(it.price);
       const qty = parseFloat(it.qty);
       // A row only competes if it has a real price and a real quantity.
@@ -222,7 +252,7 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
           label: `Option ${cfg.items.length + 1}`,
           price: "",
           qty: "",
-          unit: family.units[0].key,
+          unit: family.base,
         },
       ],
     });
@@ -247,7 +277,10 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
       family: key,
       items: cfg.items.map((i) => {
         const factor = from.units.find((u) => u.key === i.unit)?.factor ?? 1;
-        const unit = to.units.find((u) => u.factor === factor) ?? to.units[0];
+        const unit =
+          to.units.find((u) => u.factor === factor) ??
+          to.units.find((u) => u.key === to.base) ??
+          to.units[0];
         return { ...i, unit: unit.key };
       }),
     });
@@ -369,7 +402,7 @@ export default function ValueEngine({ engine }: { engine: EngineDef }) {
           </SidePanel>
 
           <SidePanel title="Measured in">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {(Object.keys(FAMILIES) as FamilyKey[]).map((k) => (
                 <button
                   key={k}
