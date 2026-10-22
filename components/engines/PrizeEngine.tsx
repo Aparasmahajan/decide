@@ -9,6 +9,7 @@ import EngineShell, {
 import type { EngineDef } from "@/lib/engines";
 import { pushHistory, readConfig, writeConfig } from "@/lib/storage";
 import { pickWeighted } from "@/lib/random";
+import { Minus, Plus } from "lucide-react";
 
 /*
  * Each prize carries a stable id. Rows used to be keyed by index, so deleting
@@ -155,6 +156,13 @@ export default function PrizeEngine({ engine }: { engine: EngineDef }) {
   const endWeightEdit = (id: string) =>
     setWeightDraft(({ [id]: _, ...rest }) => rest);
 
+  const nudgeWeight = (id: string, delta: number) => {
+    const p = cfgRef.current.prizes.find((x) => x.id === id);
+    if (!p) return;
+    endWeightEdit(id);
+    updatePrize(id, { weight: cleanWeight(Math.round(p.weight) + delta) });
+  };
+
   const exhausted = cfg.prizes.length === 0 && cfg.drawn.length > 0;
   const lead = winner ? splitLead(winner) : null;
 
@@ -165,9 +173,24 @@ export default function PrizeEngine({ engine }: { engine: EngineDef }) {
       side={
         <>
           <SidePanel title="Prizes & odds">
+            {/*
+              The odds field used to be an unlabelled number box beside the
+              name, which read as a quantity — people didn't realise it was
+              where odds are set. Column headings, −/+ steppers and the hint
+              right under the list make it explicit.
+            */}
+            {cfg.prizes.length > 0 && (
+              <div className="mb-2 flex items-center gap-2 px-0.5 text-[10px] uppercase tracking-widest text-white/40">
+                <span className="flex-1">Prize</span>
+                <span className="w-[88px] text-center">Odds</span>
+                <span className="w-9 text-right">Chance</span>
+                <span className="w-7" />
+              </div>
+            )}
             <div className="space-y-2">
               {cfg.prizes.map((p) => {
                 const live = p.weight > 0 && p.label.trim();
+                const name = p.label || "prize";
                 return (
                   <div key={p.id} className="flex items-center gap-2">
                     <input
@@ -177,19 +200,40 @@ export default function PrizeEngine({ engine }: { engine: EngineDef }) {
                       aria-label="Prize name"
                       className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-white outline-none focus:border-white/25"
                     />
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      max={MAX_WEIGHT}
-                      step="any"
-                      value={weightDraft[p.id] ?? String(p.weight)}
-                      onChange={(e) => editWeight(p.id, e.target.value)}
-                      onBlur={() => endWeightEdit(p.id)}
-                      className="w-14 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-white outline-none focus:border-white/25"
-                      title="Relative odds"
-                      aria-label={`Odds for ${p.label || "prize"}`}
-                    />
+                    <div className="flex w-[88px] shrink-0 items-center overflow-hidden rounded-lg border border-white/10 bg-white/5 focus-within:border-white/25">
+                      <button
+                        type="button"
+                        onClick={() => nudgeWeight(p.id, -1)}
+                        disabled={opening || p.weight <= 0}
+                        aria-label={`Lower odds for ${name}`}
+                        className="grid h-8 w-6 shrink-0 place-items-center text-white/50 hover:bg-white/10 hover:text-white disabled:opacity-30"
+                      >
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        max={MAX_WEIGHT}
+                        step="any"
+                        value={weightDraft[p.id] ?? String(p.weight)}
+                        onChange={(e) => editWeight(p.id, e.target.value)}
+                        onBlur={() => endWeightEdit(p.id)}
+                        onFocus={(e) => e.target.select()}
+                        className="h-8 w-full min-w-0 bg-transparent text-center text-sm tabular-nums text-white outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        title="Odds — higher is drawn more often"
+                        aria-label={`Odds for ${name}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => nudgeWeight(p.id, 1)}
+                        disabled={opening || p.weight >= MAX_WEIGHT}
+                        aria-label={`Raise odds for ${name}`}
+                        className="grid h-8 w-6 shrink-0 place-items-center text-white/50 hover:bg-white/10 hover:text-white disabled:opacity-30"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
                     <span
                       className="w-9 shrink-0 text-right text-[11px] tabular-nums text-white/40"
                       title="Chance of this prize on the next draw"
@@ -206,7 +250,7 @@ export default function PrizeEngine({ engine }: { engine: EngineDef }) {
                       }
                       disabled={opening}
                       aria-label={`Remove ${p.label || "prize"}`}
-                      className="rounded-lg px-2 py-1.5 text-sm text-white/40 hover:bg-white/5 hover:text-white/80 disabled:opacity-40"
+                      className="w-7 shrink-0 rounded-lg py-1.5 text-sm text-white/40 hover:bg-white/5 hover:text-white/80 disabled:opacity-40"
                     >
                       ✕
                     </button>
@@ -227,6 +271,10 @@ export default function PrizeEngine({ engine }: { engine: EngineDef }) {
             >
               + Add prize
             </button>
+            <p className="mt-3 text-[11px] text-white/40">
+              Higher odds are drawn more often — a prize with odds 4 comes up
+              twice as often as one with 2. Odds of 0 are never drawn.
+            </p>
           </SidePanel>
           <SidePanel title="Modes">
             <label className="flex items-center justify-between text-sm text-white/80">
@@ -247,9 +295,6 @@ export default function PrizeEngine({ engine }: { engine: EngineDef }) {
                 Put back {cfg.drawn.length} drawn
               </button>
             )}
-            <p className="mt-2 text-[11px] text-white/40">
-              Higher odds numbers are drawn more often. Odds of 0 are never drawn.
-            </p>
           </SidePanel>
         </>
       }
