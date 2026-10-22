@@ -109,7 +109,7 @@ export default function EngineShell({
                   animate={{ opacity: 1, y: 0, height: "auto" }}
                   exit={{ opacity: 0, y: 10, height: 0 }}
                   transition={{ duration: 0.3 }}
-                  className="glass overflow-hidden rounded-3xl"
+                  className="glass-solid overflow-hidden rounded-3xl"
                 >
                   <div className="flex items-center justify-between border-b border-white/5 px-5 py-3">
                     <p className="text-sm font-medium text-white/80">
@@ -178,8 +178,17 @@ export function SidePanel({
   title: string;
   children: React.ReactNode;
 }) {
+  /*
+   * `glass-solid`, not `glass`. A `backdrop-filter` has to re-blur whatever is
+   * behind it whenever that changes — and what is behind these panels is the
+   * aurora, which drifts continuously. Every side panel was therefore paying a
+   * full-area blur on every single frame, forever. Engines stack two or three
+   * of these, so this was the steady-state cost of just sitting on an engine
+   * page. The main content panel below keeps the real blur; the side rail uses
+   * the opaque variant that was already in the stylesheet for this purpose.
+   */
   return (
-    <div className="glass rounded-3xl">
+    <div className="glass-solid rounded-3xl">
       <div className="border-b border-white/5 px-5 py-3">
         <p className="text-sm font-medium text-white/80">{title}</p>
       </div>

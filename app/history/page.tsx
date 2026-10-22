@@ -73,6 +73,11 @@ export default function HistoryPage() {
           )}
         </div>
 
+        {/*
+          The list below uses `glass-solid` rather than `glass`: history grows
+          unbounded, and a backdrop-filter on a page-tall element has to be
+          re-blurred on every scroll frame.
+        */}
         <div className="mt-8">
           {filtered.length === 0 ? (
             <div className="glass rounded-3xl p-12 text-center text-white/50">
@@ -86,7 +91,7 @@ export default function HistoryPage() {
               </p>
             </div>
           ) : (
-            <ul className="glass overflow-hidden rounded-3xl">
+            <ul className="glass-solid overflow-hidden rounded-3xl">
               {filtered.map((h, i) => {
                 const engine = findEngine(h.engineId);
                 return (

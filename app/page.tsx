@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Search, Sparkles, Wand2, Zap } from "lucide-react";
 import AuroraBackground from "@/components/AuroraBackground";
 import ParticleField from "@/components/ParticleField";
@@ -26,8 +26,16 @@ export default function HomePage() {
   const reduce = useReducedMotion();
   const router = useRouter();
 
+  /*
+   * Rebuilding a 26-tile grid (each tile carries springs, a 3D context and two
+   * gradient layers) synchronously on every keystroke made typing feel sticky.
+   * Deferring the query lets React keep the input at input latency and
+   * re-render the grid at a lower priority, interruptibly.
+   */
+  const deferredQ = useDeferredValue(q);
+
   const filtered = useMemo(() => {
-    const ql = q.trim().toLowerCase();
+    const ql = deferredQ.trim().toLowerCase();
     return ENGINES.filter((e) => {
       if (cat !== "All" && e.category !== cat) return false;
       if (!ql) return true;
@@ -37,7 +45,7 @@ export default function HomePage() {
         e.category.toLowerCase().includes(ql)
       );
     });
-  }, [q, cat]);
+  }, [deferredQ, cat]);
 
   const surprise = () => {
     const live = ENGINES.filter((e) => e.status === "live");
@@ -61,7 +69,9 @@ export default function HomePage() {
         >
           <div className="chip">
             <Sparkles className="h-3.5 w-3.5 text-yellow-300" />
-            <span>26 beautifully-crafted decision engines</span>
+            <span>
+              {ENGINES.length} beautifully-crafted decision engines
+            </span>
           </div>
         </motion.div>
 
@@ -189,18 +199,20 @@ export default function HomePage() {
   );
 }
 
+const HERO_WIDGETS = [
+  { text: "🪙", pos: "left-[6%] top-[10%]", d: 0.1, rot: -6, y: -12 },
+  { text: "🎲", pos: "right-[8%] top-[6%]", d: 0.2, rot: 8, y: -10 },
+  { text: "🎡", pos: "left-[6%] top-[64%]", d: 0.35, rot: -10, y: 14 },
+  { text: "🎱", pos: "right-[6%] top-[64%]", d: 0.25, rot: 10, y: 14 },
+];
+
 function FloatingHeroWidgets({ reduce }: { reduce: boolean }) {
-  // Four widgets, no backdrop-blur, all use the same idle animation phase.
-  // Fewer moving elements = less compositor thrash on scroll and paint.
-  const widgets = [
-    { text: "🪙", pos: "left-[6%] top-[10%]", d: 0.1, rot: -6, y: -12 },
-    { text: "🎲", pos: "right-[8%] top-[6%]", d: 0.2, rot: 8, y: -10 },
-    { text: "🎡", pos: "left-[6%] top-[64%]", d: 0.35, rot: -10, y: 14 },
-    { text: "🎱", pos: "right-[6%] top-[64%]", d: 0.25, rot: 10, y: 14 },
-  ];
+  // The entrance is a one-shot, so framer is a fine fit for it. The endless
+  // idle bob is a CSS animation (`.hero-bob`) so it never touches the main
+  // thread and stops being serviced once the hero scrolls out of view.
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0">
-      {widgets.map((w, i) => (
+      {HERO_WIDGETS.map((w, i) => (
         <motion.div
           key={i}
           className={`absolute ${w.pos} hidden sm:block`}
@@ -208,25 +220,21 @@ function FloatingHeroWidgets({ reduce }: { reduce: boolean }) {
           animate={{ opacity: 1, y: 0, rotate: w.rot }}
           transition={{ duration: 0.7, delay: w.d, ease: "easeOut" }}
         >
-          <motion.div
-            className="grid h-16 w-16 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-3xl shadow-soft-lg"
-            style={{ willChange: reduce ? undefined : "transform" }}
-            animate={
-              reduce
-                ? undefined
-                : {
-                    y: [0, w.y, 0],
-                    rotate: [w.rot, w.rot + 3, w.rot],
-                  }
+          <div
+            className={
+              "grid h-16 w-16 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-3xl shadow-soft-lg" +
+              (reduce ? "" : " hero-bob")
             }
-            transition={{
-              duration: 7 + i * 0.6,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
+            style={
+              {
+                "--rot": `${w.rot}deg`,
+                "--dy": `${w.y}px`,
+                "--bob-delay": `${i * 0.6}s`,
+              } as React.CSSProperties
+            }
           >
             {w.text}
-          </motion.div>
+          </div>
         </motion.div>
       ))}
     </div>

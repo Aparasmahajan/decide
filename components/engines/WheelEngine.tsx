@@ -9,6 +9,7 @@ import EngineShell, {
 import type { EngineDef } from "@/lib/engines";
 import { pushHistory, readConfig, writeConfig } from "@/lib/storage";
 import { pickWeighted } from "@/lib/random";
+import Confetti from "@/components/Confetti";
 import { Plus, Trash2, Shuffle } from "lucide-react";
 
 type Slice = { id: string; label: string; color: string; weight: number };
@@ -61,6 +62,39 @@ export default function WheelEngine({ engine }: { engine: EngineDef }) {
     () => slices.reduce((s, i) => s + Math.max(0, i.weight), 0),
     [slices],
   );
+
+  /*
+   * Wedge geometry is derived once per slice change instead of inside the render
+   * body. The previous version re-ran a `slice(0, i).reduce(...)` per wedge —
+   * quadratic work plus a fresh array per wedge — on every single render, and
+   * this component re-renders on every keystroke in the options panel.
+   */
+  const wedges = useMemo(() => {
+    if (totalWeight <= 0) return [];
+    let acc = 0;
+    return slices.map((s) => {
+      const start = (acc / totalWeight) * Math.PI * 2;
+      acc += s.weight;
+      const end = (acc / totalWeight) * Math.PI * 2;
+      const x1 = Math.cos(start);
+      const y1 = Math.sin(start);
+      const x2 = Math.cos(end);
+      const y2 = Math.sin(end);
+      const large = end - start > Math.PI ? 1 : 0;
+      const mid = (start + end) / 2;
+      const tx = Math.cos(mid) * 0.62;
+      const ty = Math.sin(mid) * 0.62;
+      return {
+        id: s.id,
+        color: s.color,
+        label: s.label.slice(0, 14),
+        path: `M 0 0 L ${x1} ${y1} A 1 1 0 ${large} 1 ${x2} ${y2} Z`,
+        tx,
+        ty,
+        textRotate: (mid * 180) / Math.PI + 90,
+      };
+    });
+  }, [slices, totalWeight]);
 
   const spin = () => {
     if (spinning || slices.length < 2) return;
@@ -253,19 +287,32 @@ export default function WheelEngine({ engine }: { engine: EngineDef }) {
                 "conic-gradient(from 90deg, rgba(139,92,246,0.6), rgba(56,189,248,0.6), rgba(244,114,182,0.6), rgba(139,92,246,0.6))",
             }}
           />
+          {/*
+            The wheel's shadow lives on this static circle rather than as a
+            `drop-shadow()` filter on the spinning SVG. A filter on an animating
+            element has to be re-evaluated from scratch every frame — for four
+            seconds of spin that meant re-rasterizing a 360px blurred silhouette
+            60 times a second. The wheel is a circle, so an identical look comes
+            from a plain box-shadow on a layer that never moves.
+          */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute h-[360px] w-[360px] rounded-full"
+            style={{
+              boxShadow:
+                "0 20px 40px rgba(0,0,0,0.4), 0 0 40px rgba(139,92,246,0.35)",
+            }}
+          />
           <motion.svg
             width={360}
             height={360}
             viewBox="-1 -1 2 2"
             animate={{ rotate: rotation }}
             transition={{ duration: 4, ease: [0.16, 0.84, 0.28, 1] }}
-            style={{
-              transform: "rotate(-90deg)",
-              filter:
-                "drop-shadow(0 20px 40px rgba(0,0,0,0.4)) drop-shadow(0 0 40px rgba(139,92,246,0.35))",
-            }}
+            className="relative"
+            style={{ willChange: spinning ? "transform" : undefined }}
           >
-            {slices.length === 0 ? (
+            {wedges.length === 0 ? (
               <text
                 x="0"
                 y="0"
@@ -276,50 +323,33 @@ export default function WheelEngine({ engine }: { engine: EngineDef }) {
                 Add options
               </text>
             ) : (
-              slices.map((s, i) => {
-                const start =
-                  (slices.slice(0, i).reduce((a, b) => a + b.weight, 0) /
-                    totalWeight) *
-                  Math.PI *
-                  2;
-                const end = start + (s.weight / totalWeight) * Math.PI * 2;
-                const x1 = Math.cos(start);
-                const y1 = Math.sin(start);
-                const x2 = Math.cos(end);
-                const y2 = Math.sin(end);
-                const large = end - start > Math.PI ? 1 : 0;
-                const path = `M 0 0 L ${x1} ${y1} A 1 1 0 ${large} 1 ${x2} ${y2} Z`;
-                const mid = (start + end) / 2;
-                const tx = Math.cos(mid) * 0.62;
-                const ty = Math.sin(mid) * 0.62;
-                return (
-                  <g key={s.id}>
-                    <path
-                      d={path}
-                      fill={s.color}
-                      stroke="rgba(255,255,255,0.15)"
-                      strokeWidth="0.006"
-                    />
-                    <text
-                      x={tx}
-                      y={ty}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fontSize="0.08"
-                      fontWeight={700}
-                      fill="white"
-                      transform={`rotate(${(mid * 180) / Math.PI + 90}, ${tx}, ${ty})`}
-                      style={{
-                        paintOrder: "stroke",
-                        stroke: "rgba(0,0,0,0.3)",
-                        strokeWidth: 0.004,
-                      }}
-                    >
-                      {s.label.slice(0, 14)}
-                    </text>
-                  </g>
-                );
-              })
+              wedges.map((s) => (
+                <g key={s.id}>
+                  <path
+                    d={s.path}
+                    fill={s.color}
+                    stroke="rgba(255,255,255,0.15)"
+                    strokeWidth="0.006"
+                  />
+                  <text
+                    x={s.tx}
+                    y={s.ty}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize="0.08"
+                    fontWeight={700}
+                    fill="white"
+                    transform={`rotate(${s.textRotate}, ${s.tx}, ${s.ty})`}
+                    style={{
+                      paintOrder: "stroke",
+                      stroke: "rgba(0,0,0,0.3)",
+                      strokeWidth: 0.004,
+                    }}
+                  >
+                    {s.label}
+                  </text>
+                </g>
+              ))
             )}
             {/* Hub */}
             <circle
@@ -374,41 +404,3 @@ export default function WheelEngine({ engine }: { engine: EngineDef }) {
   );
 }
 
-function Confetti() {
-  const pieces = Array.from({ length: 90 }, (_, i) => i);
-  return (
-    <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
-      {pieces.map((i) => {
-        const x = Math.random() * 100;
-        const rot = Math.random() * 360;
-        const delay = Math.random() * 0.4;
-        const hue = Math.floor(Math.random() * 360);
-        const size = 6 + Math.random() * 8;
-        return (
-          <motion.span
-            key={i}
-            initial={{ y: -40, x: `${x}vw`, opacity: 0, rotate: 0 }}
-            animate={{
-              y: "110vh",
-              opacity: [0, 1, 1, 0],
-              rotate: rot + 720,
-            }}
-            transition={{
-              duration: 2 + Math.random(),
-              delay,
-              ease: "easeOut",
-            }}
-            style={{
-              position: "absolute",
-              width: size,
-              height: size * 0.4,
-              borderRadius: 2,
-              background: `hsl(${hue} 90% 65%)`,
-              boxShadow: `0 0 8px hsla(${hue},90%,60%,0.6)`,
-            }}
-          />
-        );
-      })}
-    </div>
-  );
-}
