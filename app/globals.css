@@ -73,20 +73,21 @@ body::before {
 /*
  * Glass surfaces.
  *
- * `backdrop-filter` is expensive — each element with it forces the compositor
- * to sample and re-blur pixels behind it every frame. We keep it only for a
- * handful of large panels (engine shell + side panels + hero pill),
- * with a moderate 12px blur instead of the previous 20-30px.
- * Tiles use a solid gradient bg (see EngineTile) to avoid the cost at scale.
+ * `.glass` no longer uses `backdrop-filter`. What sits behind every glass
+ * panel is the aurora, which drifts continuously, so the compositor had to
+ * re-sample and re-blur the panel's whole area on every frame for as long as
+ * the page was open. The engine stage is the biggest panel on screen and the
+ * one every flip/spin/roll animates inside, so that blur was competing with
+ * the animation for GPU time each frame — the stutter people saw mid-spin.
+ * Blurring an already-blurred aurora was nearly invisible anyway; a slightly
+ * denser tint gives the same look for free.
  */
 .glass {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.06) 0%,
-    rgba(255, 255, 255, 0.02) 100%
+    rgba(28, 30, 72, 0.55) 0%,
+    rgba(12, 13, 40, 0.5) 100%
   );
-  backdrop-filter: blur(12px) saturate(130%);
-  -webkit-backdrop-filter: blur(12px) saturate(130%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
@@ -118,6 +119,38 @@ body::before {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     0 20px 40px -20px rgba(0, 0, 0, 0.45);
+}
+
+/*
+ * Ambient particles (see ParticleField). Pure compositor animations: each dot
+ * is a tiny layer that only ever changes transform/opacity. Per-dot brightness
+ * lives in the dot's background alpha, not in a custom property, so the
+ * keyframes stay static and eligible to run off the main thread.
+ */
+.particle {
+  position: absolute;
+  border-radius: 50%;
+  will-change: transform, opacity;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+@keyframes particle-drift-a {
+  from { transform: translate3d(0, 0, 0); opacity: 1; }
+  to   { transform: translate3d(36px, -48px, 0); opacity: 0.35; }
+}
+@keyframes particle-drift-b {
+  from { transform: translate3d(0, 0, 0); opacity: 1; }
+  to   { transform: translate3d(-42px, -30px, 0); opacity: 0.35; }
+}
+@keyframes particle-drift-c {
+  from { transform: translate3d(0, 0, 0); opacity: 1; }
+  to   { transform: translate3d(28px, 40px, 0); opacity: 0.35; }
+}
+@keyframes particle-drift-d {
+  from { transform: translate3d(0, 0, 0); opacity: 1; }
+  to   { transform: translate3d(-30px, 36px, 0); opacity: 0.35; }
 }
 
 /* Hairline dividers */

@@ -7,7 +7,12 @@ import { useEffect, useState } from "react";
 import AuroraBackground from "./AuroraBackground";
 import ParticleField from "./ParticleField";
 import Nav from "./Nav";
-import { clearHistory, readHistory, type HistoryEntry } from "@/lib/storage";
+import {
+  clearHistory,
+  readHistory,
+  subscribeHistory,
+  type HistoryEntry,
+} from "@/lib/storage";
 import type { EngineDef } from "@/lib/engines";
 import { cn } from "@/lib/cn";
 
@@ -26,11 +31,14 @@ export default function EngineShell({
 }: Props) {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [tick, setTick] = useState(0);
 
+  // Re-read whenever any engine pushes or clears history, so the badge and the
+  // panel reflect the outcome that just landed.
   useEffect(() => {
-    setHistory(readHistory(engine.slug));
-  }, [engine.slug, tick]);
+    const sync = () => setHistory(readHistory(engine.slug));
+    sync();
+    return subscribeHistory(sync);
+  }, [engine.slug]);
 
   return (
     <div className="relative min-h-screen">
@@ -104,11 +112,17 @@ export default function EngineShell({
             {side}
             <AnimatePresence initial={false}>
               {showHistory && (
+                /*
+                  Opacity + translate only. Animating `height: auto` re-ran
+                  layout every frame, and once the side column outgrew the
+                  stage it stretched the grid row — re-laying-out the engine
+                  itself — for the length of the transition.
+                */
                 <motion.div
-                  initial={{ opacity: 0, y: 10, height: 0 }}
-                  animate={{ opacity: 1, y: 0, height: "auto" }}
-                  exit={{ opacity: 0, y: 10, height: 0 }}
-                  transition={{ duration: 0.3 }}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  transition={{ duration: 0.2 }}
                   className="glass-solid overflow-hidden rounded-3xl"
                 >
                   <div className="flex items-center justify-between border-b border-white/5 px-5 py-3">
@@ -116,10 +130,7 @@ export default function EngineShell({
                       Recent outcomes
                     </p>
                     <button
-                      onClick={() => {
-                        clearHistory(engine.slug);
-                        setTick((t) => t + 1);
-                      }}
+                      onClick={() => clearHistory(engine.slug)}
                       className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
                     >
                       <Trash2 className="h-3 w-3" />
@@ -215,20 +226,19 @@ export function BigActionButton({
     <motion.button
       onClick={onClick}
       disabled={disabled}
-      whileHover={{ y: -2, scale: 1.02 }}
-      whileTap={{ scale: 0.96 }}
+      whileHover={disabled ? undefined : { y: -2, scale: 1.02 }}
+      whileTap={disabled ? undefined : { scale: 0.96 }}
       transition={{ type: "spring", stiffness: 400, damping: 22 }}
-      className="group relative inline-flex items-center gap-2 overflow-hidden rounded-2xl px-8 py-4 text-base font-semibold text-white disabled:opacity-50"
+      className="group relative inline-flex items-center gap-2 overflow-hidden rounded-2xl px-8 py-4 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
       style={{
         background: `linear-gradient(135deg, ${color}, ${color2})`,
         boxShadow: `0 12px 30px -8px ${color}88, 0 24px 60px -10px ${color2}55, inset 0 1px 0 rgba(255,255,255,0.35)`,
       }}
     >
       <span className="relative z-10">{label}</span>
-      <span
-        className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full"
-        style={{ mixBlendMode: "overlay" }}
-      />
+      {/* Hover sheen. No blend mode: `overlay` made the whole button an
+          isolated group that had to read back its backdrop on every repaint. */}
+      <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/25 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full group-disabled:hidden" />
     </motion.button>
   );
 }

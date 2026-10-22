@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Dices, Sparkles } from "lucide-react";
+import { memo } from "react";
 
-export default function Nav() {
+function Nav() {
   return (
     <motion.header
       initial={{ y: -20, opacity: 0 }}
@@ -54,3 +55,5 @@ export default function Nav() {
     </motion.header>
   );
 }
+
+export default memo(Nav);

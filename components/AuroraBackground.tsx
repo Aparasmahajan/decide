@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 type Props = {
   intensity?: number;
@@ -32,7 +32,7 @@ const PALETTES = {
  *   for it at all.
  * - Skips animation and pointer tracking under `prefers-reduced-motion`.
  */
-export default function AuroraBackground({
+function AuroraBackground({
   intensity = 1,
   variant = "default",
   interactive = true,
@@ -165,3 +165,6 @@ export default function AuroraBackground({
     </div>
   );
 }
+
+// Engines re-render their shell on every state change; the backdrop never needs to.
+export default memo(AuroraBackground);

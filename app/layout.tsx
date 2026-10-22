@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
   title: "Decide — Can't decide? Let fate do it.",
@@ -21,7 +22,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   themeColor: "#04051f",
 };
 
@@ -34,7 +34,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className="min-h-screen antialiased">
         <div id="app-root" className="relative min-h-screen">
-          {children}
+          <Providers>{children}</Providers>
         </div>
       </body>
     </html>

@@ -10,15 +10,33 @@ export function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/**
+ * Weighted pick. Items with a zero, negative or non-finite weight can never be
+ * chosen (unless every weight is unusable, in which case it's a uniform pick).
+ *
+ * The comparison is strict: with `r <= 0`, a Math.random() of exactly 0 let
+ * the first item win even when its weight was 0.
+ */
 export function pickWeighted<T>(arr: { value: T; weight: number }[]): T {
-  const total = arr.reduce((s, i) => s + Math.max(0, i.weight), 0);
-  if (total <= 0) return pick(arr).value;
+  const usable = arr.filter((i) => Number.isFinite(i.weight) && i.weight > 0);
+  if (usable.length === 0) return pick(arr).value;
+  const total = usable.reduce((s, i) => s + i.weight, 0);
   let r = Math.random() * total;
-  for (const item of arr) {
-    r -= Math.max(0, item.weight);
-    if (r <= 0) return item.value;
+  for (const item of usable) {
+    r -= item.weight;
+    if (r < 0) return item.value;
   }
-  return arr[arr.length - 1].value;
+  // Floating-point leftovers land on the last item that could actually win.
+  return usable[usable.length - 1].value;
+}
+
+/**
+ * Round trig-derived geometry before it goes into markup. Node and the browser
+ * can disagree on the last bit of Math.sin/Math.cos, which turned server-
+ * rendered SVG paths and seat positions into hydration mismatches.
+ */
+export function stable(n: number): number {
+  return Math.round(n * 1e5) / 1e5;
 }
 
 export function shuffle<T>(arr: T[]): T[] {

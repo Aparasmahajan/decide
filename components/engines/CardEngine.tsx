@@ -1,7 +1,7 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
-import { useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
 import EngineShell, {
   BigActionButton,
   SidePanel,
@@ -17,34 +17,73 @@ const SUITS = [
   { s: "♣", name: "Clubs", color: "#94a3b8" },
 ];
 const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+const RANK_NAMES: Record<string, string> = {
+  A: "Ace",
+  J: "Jack",
+  Q: "Queen",
+  K: "King",
+};
 
 type Card = { rank: string; suit: (typeof SUITS)[number] };
 
+const cardName = (c: Card) => `${RANK_NAMES[c.rank] ?? c.rank} of ${c.suit.name}`;
+/** Spades and clubs are pale in the UI palette; on the white face they print dark. */
+const inkOf = (c: Card) =>
+  c.suit.s === "♠" || c.suit.s === "♣" ? "#0f172a" : c.suit.color;
+
+/** The half-turn between face down and face up. */
+const FLIP_MS = 800;
+/**
+ * The lifted, wiggling "draw" before the reveal. It must outlast FLIP_MS: a
+ * card left face up turns face down during it, and the next card may only be
+ * swapped onto the front once that old face has turned away.
+ */
+const SHUFFLE_MS = FLIP_MS + 100;
+
+/** idle → shuffle (lift, wiggle, turn face down) → reveal (turn face up) → idle */
+type Phase = "idle" | "shuffle" | "reveal";
+
 export default function CardEngine({ engine }: { engine: EngineDef }) {
   const [card, setCard] = useState<Card | null>(null);
-  const [drawing, setDrawing] = useState(false);
-  const [flipped, setFlipped] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [faceUp, setFaceUp] = useState(false);
+  const reduce = useReducedMotion();
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  const drawing = phase !== "idle";
+
+  /*
+   * The old draw nulled the card and started the flip back in the same frame,
+   * so the front swung through view as a blank white face; it then announced
+   * the new card (and wrote history) the instant the reveal flip *started*,
+   * 800ms before the face was actually showing. Now the old card keeps its
+   * face until it has turned away, and the result lands when the flip does.
+   */
   const draw = () => {
     if (drawing) return;
-    setDrawing(true);
-    setFlipped(false);
-    setCard(null);
-
-    setTimeout(() => {
-      const c: Card = {
-        rank: pick(RANKS),
-        suit: pick(SUITS),
-      };
-      setCard(c);
-      setFlipped(true);
-      pushHistory({
-        engineId: engine.slug,
-        outcome: `${c.rank}${c.suit.s} ${c.suit.name}`,
-      });
-      setDrawing(false);
-    }, 900);
+    const c: Card = { rank: pick(RANKS), suit: pick(SUITS) };
+    setPhase("shuffle");
+    setFaceUp(false);
+    timers.current = [
+      setTimeout(() => {
+        setCard(c);
+        setFaceUp(true);
+        setPhase("reveal");
+      }, SHUFFLE_MS),
+      setTimeout(() => {
+        setPhase("idle");
+        pushHistory({
+          engineId: engine.slug,
+          outcome: `${c.rank}${c.suit.s} · ${cardName(c)}`,
+        });
+      }, SHUFFLE_MS + FLIP_MS),
+    ];
   };
+
+  const ink = card ? inkOf(card) : undefined;
+  const wiggle = phase === "shuffle" && !reduce;
 
   return (
     <EngineShell
@@ -65,20 +104,27 @@ export default function CardEngine({ engine }: { engine: EngineDef }) {
         </p>
 
         <div className="perspective-1000 grid flex-1 place-items-center">
+          {/*
+            Back at rotateY(0), front pre-turned to rotateY(180), both with
+            hidden backfaces. Container at 0: back is at 0 (facing), front at
+            180 (hidden). Container at 180: back at 180 (hidden), front at
+            360 ≡ 0 — facing, and not mirrored. `will-change` is permanent so
+            the faces' 3D layers aren't created on the first frame of a flip.
+          */}
           <motion.div
             className="preserve-3d relative"
-            style={{ width: 220, height: 320 }}
+            style={{ width: 220, height: 320, willChange: "transform" }}
             animate={{
-              rotateY: flipped ? 180 : 0,
-              y: drawing ? -20 : 0,
-              rotate: drawing ? [0, -3, 3, 0] : 0,
+              rotateY: faceUp ? 180 : 0,
+              y: phase === "shuffle" ? -20 : 0,
+              rotate: wiggle ? [0, -3, 3, 0] : 0,
             }}
             transition={{
-              rotateY: { duration: 0.8, ease: [0.2, 0.8, 0.2, 1] },
+              rotateY: { duration: FLIP_MS / 1000, ease: [0.2, 0.8, 0.2, 1] },
               y: { duration: 0.4 },
               rotate: {
                 duration: 0.3,
-                repeat: drawing ? Infinity : 0,
+                repeat: wiggle ? Infinity : 0,
               },
             }}
           >
@@ -92,7 +138,16 @@ export default function CardEngine({ engine }: { engine: EngineDef }) {
                   "0 20px 40px -10px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.15)",
               }}
             >
-              <div className="grid h-32 w-24 place-items-center rounded-xl border border-white/20 bg-white/5 backdrop-blur">
+              {/*
+                Solid fill, not `backdrop-blur`: a backdrop filter inside a
+                spinning 3D layer re-samples and re-blurs what's behind it on
+                every frame of the flip. Blurred 8px stripes average to this
+                colour anyway.
+              */}
+              <div
+                className="grid h-32 w-24 place-items-center rounded-xl border border-white/20"
+                style={{ background: "#322f6e" }}
+              >
                 <span className="text-4xl">🃏</span>
               </div>
             </div>
@@ -107,10 +162,7 @@ export default function CardEngine({ engine }: { engine: EngineDef }) {
             >
               {card && (
                 <div className="relative flex h-full flex-col justify-between text-slate-900">
-                  <div
-                    className="flex flex-col items-start"
-                    style={{ color: card.suit.color === "#e2e8f0" || card.suit.color === "#94a3b8" ? "#0f172a" : card.suit.color }}
-                  >
+                  <div className="flex flex-col items-start" style={{ color: ink }}>
                     <span className="text-3xl font-bold leading-none">
                       {card.rank}
                     </span>
@@ -118,13 +170,13 @@ export default function CardEngine({ engine }: { engine: EngineDef }) {
                   </div>
                   <div
                     className="grid place-items-center text-8xl"
-                    style={{ color: card.suit.color === "#e2e8f0" || card.suit.color === "#94a3b8" ? "#0f172a" : card.suit.color }}
+                    style={{ color: ink }}
                   >
                     {card.suit.s}
                   </div>
                   <div
                     className="flex flex-col items-end rotate-180"
-                    style={{ color: card.suit.color === "#e2e8f0" || card.suit.color === "#94a3b8" ? "#0f172a" : card.suit.color }}
+                    style={{ color: ink }}
                   >
                     <span className="text-3xl font-bold leading-none">
                       {card.rank}
@@ -139,7 +191,7 @@ export default function CardEngine({ engine }: { engine: EngineDef }) {
 
         <div className="flex flex-col items-center gap-6">
           <AnimatePresence mode="wait">
-            {card && flipped && !drawing && (
+            {card && faceUp && !drawing && (
               <motion.div
                 key={card.rank + card.suit.s}
                 initial={{ opacity: 0, y: 6 }}
@@ -148,7 +200,7 @@ export default function CardEngine({ engine }: { engine: EngineDef }) {
                 className="text-center"
               >
                 <p className="text-lg font-semibold text-white">
-                  {card.rank} of {card.suit.name}
+                  {cardName(card)}
                 </p>
               </motion.div>
             )}
